@@ -20,3 +20,13 @@ as one amendment to `docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md`.
 The owner asked to start: step 1 sets the plan to In implementation.
 Dependencies: libmsdf is taken at `b48d066` (0.4.0), the revision libcontrols
 0.5.0 pins, so the graph holds one libmsdf.
+
+## 2026-10-22 08:54 EDT — Phonon TTS plan, step 1: small departures
+
+Plan `docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md`, step 1:
+- `App::limits` asks for at least 8 storage buffers per shader stage.
+  libmsdf's fragment stage binds five, and libmorph's downlevel default of
+  four fails device bring-up.
+- `scripts/android.sh` is added to the layout of section 3. It is the
+  two-stage build (cargo, then gradle) of libmorph's
+  `examples/android/build.sh`, for `dev.tmzt.voicexn`.
