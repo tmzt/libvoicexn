@@ -1,7 +1,7 @@
 ---
 title: libvoicexn, a speech library with voicexn as its demo
 date: 2026-10-22
-status: In implementation
+status: Implemented
 covers:
   - Renaming this repository to `~/src/libvoicexn`, keeping its history,
     plans and `CHANGES.md`
@@ -242,3 +242,22 @@ At the owner's request ("continue rename plan"), step 1 starts with this
 commit, and `status` is now `In implementation`. The document is
 immutable from here on (AGENTS.md Rule 1.5). Open question 2 is settled as
 the plan says: the example keeps the name `voicexn`.
+
+## Amendment — 2026-10-22 14:15 EDT: implemented
+
+Every step is done and its **Done when:** holds, with the departures
+recorded in `CHANGES.md` (addenda of 2026-10-22, "libvoicexn split,
+step 1" to "step 6"). `status` is now `Implemented`.
+
+- Step 0: held at `3bdfc11`.
+- Step 1: `c47bc3e`, `7a25534`, `ceb8f54`, `a3528ec`. "Sample-equal"
+  needed a fixed seed and one thread, since Phonon's default seed is random.
+- Step 2: `3b4f993`, `62816e1`.
+- Step 3: `0a82a48`, `8c805d9`, `7fc023c`.
+- Step 4: `bd274ad`, `0750a89`. The desktop default is q4k, by the owner's
+  decision, not by the one-minute A/B.
+- Step 5: `2db4042`, `1e4a0c1`, `66b8ed2`, `0d2d1da`, `3250b2b` (tag
+  `v0.1.0`).
+- Step 6: `0b3115b`.
+- Records: `9bbe1d4`, `db50e4c`, `40565e9`, `d1aa4f7`, `77859f0`,
+  `a8d168c`.
