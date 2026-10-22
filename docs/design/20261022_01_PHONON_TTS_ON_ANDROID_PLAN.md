@@ -228,3 +228,30 @@ today. That is a question for the owner, not settled here.
 2. Which four preset phrases? Placeholders until then.
 3. Should the voice picker list every voice in `gradium/phonon-voices`
    (about 100), or a fixed short list bundled with the push script?
+
+## Amendment — 2026-10-22 08:50 EDT: the voice list, and Apple silicon builds
+
+The owner answered open question 3 and noted that the desktop builds run on
+Apple silicon. This amendment replaces open question 3 in section 7, adds to
+step 2 in section 5, and adds to section 4.
+
+**Voices.** The picker offers the short list from Gradium's web demo
+(Hugging Face space `gradium/phonon` at `fcf37734`, `models.json`, entry
+"Phonon 31M"): `default` (the checkpoint's `default-voice.safetensors`)
+followed by the demo's 37 voices in its order, 12 American English, 13
+British English and 12 characters. Their files come from
+`gradium/phonon-voices` at `da6c9ec0d47be8df5c87c730a3aa97187f3229c3`, the
+revision `ptts` 0.4.1 pins in `voice_catalog.rs`. `scripts/fetch-model.sh`
+downloads each one to `models/phonon-31m-en/voices/<name>.safetensors`,
+named by the demo's display name, so `register_voices` lists them under
+those names. The list is kept in `scripts/voices.tsv` (name, locale, file).
+The demo's English example sentence, "Phonon turns text into natural
+speech, right on your device, with no cloud round trip.", is the first
+preset phrase. Open questions 1 and 2 stay open for the rest.
+
+**Apple silicon.** The desktop target `aarch64-apple-darwin` defaults to
+`target-cpu=apple-m1`, which already has `neon`, `dotprod` and `fp16`,
+so xn compiles the same q8 kernels on the Mac as on the phone with no
+rustflags. `.cargo/config.toml` sets nothing for it. The timings logged in
+step 2 are therefore a fair preview of the phone's kernels, but not of its
+speed.
