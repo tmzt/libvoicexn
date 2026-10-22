@@ -1,8 +1,7 @@
 //! From the `tts` thread to the speaker (plan section 2, decision 4): a
 //! single-producer, single-consumer ring of interleaved `f32` frames at the
-//! output's rate, a resampler from Phonon's 24 kHz, and the libmorph
-//! `Source` that pops from the ring on the audio thread without blocking or
-//! allocating.
+//! output's rate, a resampler from Phonon's 24 kHz, and the consumer that
+//! pops from the ring on the audio thread without blocking or allocating.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +24,8 @@ pub struct Producer {
     scratch: Vec<f32>,
 }
 
-/// The audio thread's end, turned into a libmorph `Source` by [`source`].
+/// The audio thread's end: [`fill`](Self::fill) it from the output
+/// callback, or turn it into a libmorph `Source` with `morph::source`.
 pub struct Consumer {
     ring: rtrb::Consumer<f32>,
     flush: Arc<AtomicBool>,
@@ -129,11 +129,6 @@ impl Consumer {
         }
         self.speaking.store(n > 0, Ordering::Relaxed);
     }
-}
-
-/// The libmorph `Source` that plays the ring.
-pub fn source(mut consumer: Consumer) -> libmorph::Source {
-    Box::new(move |out: &mut [f32]| consumer.fill(out))
 }
 
 /// Linear-interpolating resampler for one channel that carries its position

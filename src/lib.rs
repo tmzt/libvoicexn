@@ -7,6 +7,10 @@
 
 #[cfg(feature = "stt-moshi-xn-boost")]
 pub mod boost;
+#[cfg(feature = "stt-moshi-xn")]
+pub mod capture;
+#[cfg(feature = "morph")]
+pub mod morph;
 pub mod playback;
 #[cfg(feature = "stt-moshi-xn")]
 pub mod spm;

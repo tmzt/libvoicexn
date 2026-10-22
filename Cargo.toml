@@ -10,7 +10,8 @@ description = "Speech in and out on xn: Phonon text-to-speech and Kyutai speech-
 name = "libvoicexn"
 
 [dependencies]
-libmorph = { git = "https://github.com/tmzt/libmorph", rev = "bb0174d14f77e4b54a250e78293b3a9cb4a6617a" }
+# The adapters of src/morph.rs, behind `morph`; the core does not need it.
+libmorph = { git = "https://github.com/tmzt/libmorph", rev = "bb0174d14f77e4b54a250e78293b3a9cb4a6617a", optional = true }
 log = "0.4"
 # The realtime-safe ring between the tts thread and the audio thread.
 rtrb = "0.3"
@@ -32,6 +33,8 @@ stt-moshi-xn = ["dep:xn-moshi", "dep:xn", "dep:serde_json"]
 vad-earshot = ["stt-moshi-xn", "dep:earshot"]
 # Bias STT toward a phrase list, vocab.txt (plan 20261022_04).
 stt-moshi-xn-boost = ["stt-moshi-xn"]
+# libmorph Sink and Source adapters (plan 20261022_05, decision 4).
+morph = ["dep:libmorph"]
 
 [workspace]
 members = [".", "examples/voicexn"]
