@@ -88,8 +88,7 @@ impl Producer {
     }
 
     /// Drops what is queued and what the resampler holds, for `Stop`. The
-    /// audio thread does the dropping; this waits for it, up to
-    /// [`FLUSH_WAIT`].
+    /// audio thread does the dropping; this waits for it, up to 100 ms.
     pub fn flush(&mut self) {
         self.resampler.reset();
         self.flush.store(true, Ordering::Release);

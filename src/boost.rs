@@ -13,8 +13,8 @@ const ENDS: [u32; 2] = [0, 2];
 const PADS: [u32; 2] = [3, 4];
 
 /// Default biases, added to the text logits (decision 4).
-pub const START: f32 = 1.5;
-pub const CONT: f32 = 8.0;
+pub(crate) const START: f32 = 1.5;
+pub(crate) const CONT: f32 = 8.0;
 
 pub struct VocabBooster {
     /// Each phrase's tokens, as written and capitalized.
@@ -122,7 +122,7 @@ impl xn_moshi::asr::TokenBooster for VocabBooster {
 }
 
 /// One phrase per line; blank lines and `#` comments are skipped.
-pub fn read_vocab(path: &Path) -> std::io::Result<Vec<String>> {
+pub(crate) fn read_vocab(path: &Path) -> std::io::Result<Vec<String>> {
     Ok(std::fs::read_to_string(path)?
         .lines()
         .map(str::trim)

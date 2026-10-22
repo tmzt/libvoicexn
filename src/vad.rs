@@ -6,22 +6,22 @@
 use std::collections::VecDeque;
 
 /// One earshot frame, 16 ms, in 24 kHz samples.
-pub const SUB: usize = 384;
+pub(crate) const SUB: usize = 384;
 
 /// A score at or above this is voice.
-pub const VOICE: f32 = 0.5;
+pub(crate) const VOICE: f32 = 0.5;
 /// A score below this is quiet.
-pub const QUIET: f32 = 0.35;
+pub(crate) const QUIET: f32 = 0.35;
 /// Voice frames in a row that open the gate: 80 ms.
-pub const OPEN_RUN: u32 = 5;
+pub(crate) const OPEN_RUN: u32 = 5;
 /// Quiet frames in a row that start closing it: 800 ms.
-pub const CLOSE_RUN: u32 = 50;
+pub(crate) const CLOSE_RUN: u32 = 50;
 /// Frames armed with no voice before giving up: 6 s.
-pub const ARM_TIMEOUT: u32 = 375;
+pub(crate) const ARM_TIMEOUT: u32 = 375;
 /// Frames of closing before the gate is idle even with no utterance: 3 s.
-pub const CLOSING_MAX: u32 = 188;
+pub(crate) const CLOSING_MAX: u32 = 188;
 /// Audio kept while armed and fed in when the gate opens: 320 ms.
-pub const PRE_ROLL: usize = 20 * SUB;
+pub(crate) const PRE_ROLL: usize = 20 * SUB;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GateState {

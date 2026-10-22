@@ -71,7 +71,7 @@ where
 /// Kyutai STT on the CPU: the LM from a quantized GGUF, Mimi from
 /// `mimi.safetensors` (the GGUF leaves out Mimi's decoder, which
 /// `Mimi::load` builds too).
-pub struct Stt {
+pub(crate) struct Stt {
     state: Box<dyn AsrStep>,
     mask: xn::streaming::StreamMask,
     decoder: crate::spm::Decoder,
@@ -79,24 +79,24 @@ pub struct Stt {
     /// SentencePiece places the spaces (as xn-moshi's `run_asr` does).
     tokens: Vec<u32>,
     decoded: usize,
-    pub asr_delay_in_tokens: usize,
+    pub(crate) asr_delay_in_tokens: usize,
 }
 
 /// Mimi's frame: 80 ms at 24 kHz.
-pub const FRAME: usize = 1920;
+pub(crate) const FRAME: usize = 1920;
 /// Put back between words before decoding.
 const WORD_SEPARATOR: u32 = 3;
 
 /// One step's output.
 #[derive(Debug, Default)]
-pub struct Step {
+pub(crate) struct Step {
     /// Text added by the words recognised in this step.
-    pub text: String,
-    pub word_starts: Vec<f64>,
+    pub(crate) text: String,
+    pub(crate) word_starts: Vec<f64>,
 }
 
 impl Stt {
-    pub fn load(settings: &SttConfig) -> Result<Self, String> {
+    pub(crate) fn load(settings: &SttConfig) -> Result<Self, String> {
         use xn::nn::VB;
         use xn_moshi::{lm::LmModel, mimi::Mimi, moshi};
 
@@ -179,7 +179,7 @@ impl Stt {
     }
 
     /// Feeds one 80 ms frame of 24 kHz mono.
-    pub fn step(&mut self, frame: &[f32; FRAME]) -> Result<Step, String> {
+    pub(crate) fn step(&mut self, frame: &[f32; FRAME]) -> Result<Step, String> {
         let audio = xn::Tensor::from_vec(frame.to_vec(), (1, 1, FRAME), &xn::CPU)
             .map_err(|e| e.to_string())?;
         let pcm = xn::streaming::StreamTensor::from_tensor(audio);
@@ -209,7 +209,7 @@ impl Stt {
     }
 
     /// Everything recognised so far.
-    pub fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         self.decoder.decode(&self.tokens)
     }
 }
@@ -256,7 +256,7 @@ pub fn transcribe_file(config: &SttConfig, wav: &std::path::Path) -> Result<Stri
 }
 
 /// A 16-bit PCM or 32-bit float WAV file as 24 kHz mono.
-pub fn read_wav(path: &std::path::Path) -> Result<Vec<f32>, String> {
+pub(crate) fn read_wav(path: &std::path::Path) -> Result<Vec<f32>, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     if bytes.len() < 12 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return Err("not a WAV file".into());
@@ -304,15 +304,15 @@ pub fn read_wav(path: &std::path::Path) -> Result<Vec<f32>, String> {
 
 /// Splits the transcript into utterances: one ends once a word has been
 /// heard and then [`Segmenter::end_frames`] frames pass without another.
-pub struct Segmenter {
-    pub end_frames: u32,
+pub(crate) struct Segmenter {
+    pub(crate) end_frames: u32,
     text: String,
     quiet: u32,
 }
 
 impl Segmenter {
     /// About 1.2 s of no new words, after the model's own 0.5 s delay.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             end_frames: 15,
             text: String::new(),
@@ -321,7 +321,8 @@ impl Segmenter {
     }
 
     /// Ends the utterance now, if it has any words.
-    pub fn flush(&mut self) -> Option<String> {
+    #[cfg(feature = "vad-earshot")]
+    pub(crate) fn flush(&mut self) -> Option<String> {
         self.quiet = 0;
         let text = std::mem::take(&mut self.text);
         let text = text.trim();
@@ -329,12 +330,12 @@ impl Segmenter {
     }
 
     /// The utterance so far.
-    pub fn partial(&self) -> &str {
+    pub(crate) fn partial(&self) -> &str {
         self.text.trim()
     }
 
     /// Takes one step's new text; returns the utterance once it ends.
-    pub fn push(&mut self, new_text: &str) -> Option<String> {
+    pub(crate) fn push(&mut self, new_text: &str) -> Option<String> {
         if !new_text.is_empty() {
             self.text.push_str(new_text);
             self.quiet = 0;
