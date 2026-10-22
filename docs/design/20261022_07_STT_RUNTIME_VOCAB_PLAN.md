@@ -194,3 +194,38 @@ phrases it holds. An empty list turns the boost off. The phrase list in
    about 1.2 s of no new words.
 3. Should the event also report the list as encoded, for example the
    phrases that encoded to nothing? Today such a phrase is only dropped.
+
+## Amendment — 2026-10-22 16:34 EDT: encoding at the boundary; open questions settled
+
+Agreed with the owner (2026-10-22): "the boost list isn't likely to be
+changed every turn"; on pre-encoded token IDs from the server, the list stays
+text; "amend it, the answers are fine". This replaces decision 4, the
+`VocabSwap` of step 2, part of step 4, and section 5.
+
+- **Measured** with `VocabBooster::from_phrases` and the real
+  `tokenizer.model` (a throwaway benchmark, not committed): M4, 30 phrases
+  in 0.12 ms and 300 in 1.41 ms; S23 Ultra at thermal status 0, the nine
+  `lib*` names in 0.09–0.11 ms, 30 phrases in 0.23–0.29 ms and 300 (600
+  sequences) in 2.41–2.47 ms. The S23 steps in 50–65 ms of its 80 ms frame.
+- **Decision 4 is replaced.** There is no `stt-vocab` thread and no
+  sequence number. A `Vocabulary` request is kept as text in `Listener`;
+  one arriving before the boundary replaces the one waiting. At the boundary
+  of decision 5, the stt thread encodes it with `from_phrases` and puts the
+  table in the slot. The `spm::Decoder` stays owned by `Stt`, without an
+  `Arc`.
+- **The list stays text.** Token IDs belong to one tokenizer (stt-1b-en_fr's
+  8000 pieces; stt-2.6b-en has 4000), so a sender of IDs would have to know
+  the client's model; the client already holds `tokenizer.model` for
+  decoding, and the capitalized forms and word starts are the booster's
+  business. `SttRequest::Vocabulary(Vec<String>)` stands.
+- **Step 2**, in place of its `VocabSwap`: `VocabSwap { next:
+  Option<Vec<String>> }` with `offer(list)` and `take()`; the tests are
+  that the last list offered wins and that nothing is taken mid-utterance.
+- **Step 4** also logs, from the app on the S23, the time the stt thread
+  spends encoding at the boundary for the nine names and for a 300-name
+  list. If 300 names take more than 10 ms there, decision 4's thread returns
+  as a departure recorded in `CHANGES.md`.
+- **Section 5 is settled:** `start` and `cont` stay in `SttConfig::boost`
+  and the request carries only phrases (1); in always-listening mode a list
+  waits for the end of the current utterance (2); `SttEvent::Vocabulary`
+  counts only the phrases and sequences applied (3).
