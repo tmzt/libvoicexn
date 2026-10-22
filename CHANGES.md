@@ -30,3 +30,16 @@ Plan `docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md`, step 1:
 - `scripts/android.sh` is added to the layout of section 3. It is the
   two-stage build (cargo, then gradle) of libmorph's
   `examples/android/build.sh`, for `dev.tmzt.voicexn`.
+
+## 2026-10-22 08:59 EDT — Phonon TTS plan, step 2: small departures
+
+Plan `docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md`, step 2:
+- `ptts` comes from git at tag v0.4.1 (`49b9033`), not crates.io: 0.4.1
+  is not published there yet (0.4.0 is the latest). Decision 1 named
+  `version = "0.4.1"`. Switch back once it is published.
+- `TtsWorker::spawn(model_dir, record: Option<PathBuf>)`: `record` writes
+  each utterance as a WAV file, which `--say` uses. Step 3 adds the ring
+  `Producer` that section 3 names. `TtsWorker::wait` blocks for the next
+  event, for `--say`. `TtsEvent::Failed` reports a failed utterance.
+- `scripts/fetch-model.sh` uses `curl` against both pinned revisions rather
+  than `hf download`, so it needs no Python tooling.
