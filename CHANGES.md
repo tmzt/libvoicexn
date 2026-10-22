@@ -179,3 +179,11 @@ New planned work on `feat-moshi-xn`: a `vad-earshot` feature (on top of
 `stt-moshi-xn`) that uses the pure-Rust `earshot` 1.2.2 VAD. A tap arms,
 earshot opens and closes the gate, and the STT model is idle between turns.
 Plan: `docs/design/20261022_03_VAD_TOUCH_GATE_PLAN.md` (Draft), two steps.
+
+## 2026-10-22 10:27 EDT — Vocabulary boost plan
+
+New planned work on `feat-moshi-xn`: a `stt-moshi-xn-boost` feature that
+biases Kyutai STT toward a phrase list through xn-moshi's `TokenBooster`.
+It needs SentencePiece encoding in `src/spm.rs`. The first list is the
+`lib*` folders in `~/src`.
+Plan: `docs/design/20261022_04_STT_VOCAB_BOOST_PLAN.md` (Draft), three steps.
