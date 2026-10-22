@@ -1,7 +1,7 @@
 ---
 title: Mimi's encoder from the STT GGUF, without mimi.safetensors
 date: 2026-10-22
-status: Draft
+status: In implementation
 covers:
   - Loading Kyutai STT's Mimi encoder from `model.q4k.gguf`, which already
     holds it, so `mimi.safetensors` (385 MB) is no longer read, pushed or
@@ -179,3 +179,20 @@ GGUF, the phone gets one 1.02 GB model file instead of 1.41 GB, and about
    app will mix the two sources, it could be 0.1.1.
 2. Should the fork be offered upstream before libvoicexn uses it, and
    should libvoicexn wait for a release instead of using the fork?
+
+## Amendment — 2026-10-22 14:32 EDT: approved; implementation started
+
+The owner (2026-10-22): "create the fork, no pull request (I will make that
+decision and write it up myself). approve and implement." This replaces
+the open questions of section 5 and the pull request in step 1:
+
+- The fork `github.com/tmzt/xn-moshi` was created with `gh repo fork`
+  and cloned to `~/src/xn-moshi` at `b5366b7` (step 0 holds).
+- No pull request is opened to `gradium-ai/xn-moshi`; that is the owner's
+  decision. libvoicexn uses the fork now (open question 2).
+- The version is 0.2.0, marked **Breaking**, as decision 5 says (open
+  question 1).
+
+`status` is now `In implementation`, and the document is immutable from
+here on (AGENTS.md Rule 1.5). Step 1 is in the fork, not in this
+repository, so the status change is its own commit here.
