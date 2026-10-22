@@ -332,3 +332,26 @@ holds it, through a `Mimi::load_encoder` added to a fork of xn-moshi, so
 unused decoder weights leave memory. No crate on crates.io does this on xn.
 Plan: `docs/design/20261022_06_MIMI_ENCODER_ONLY_PLAN.md` (Draft), steps 0
 to 4.
+
+## 2026-10-22 14:53 EDT — Mimi encoder-only, steps 1 to 4: departures
+
+Plan `docs/design/20261022_06_MIMI_ENCODER_ONLY_PLAN.md`; `5d994ac` in
+`tmzt/xn-moshi` (branch `mimi-encoder-only`, no pull request), and here
+`b6480aa`, `6390507`, `f2a3023` and `32b8032` (tag `v0.2.0`).
+- Step 1: `cargo fmt --check` cannot pass for the whole fork, because
+  upstream's `examples/moshi.rs` is not formatted at `b5366b7`; it was
+  left as it is, and only `src/mimi.rs` was checked. Clippy has no
+  warnings before or after.
+- Step 1: the test's tiny Mimi has two SEANet ratios (2, 2), not one, and
+  its weights are not written out by hand: each name and shape is taken
+  from the loaders' own "not found" and "shape mismatch" errors, filled
+  with 0.01. `Mimi::load` now calls `load_encoder` and adds the decoder,
+  reading the same tensors as before.
+- Step 2: `mimi.safetensors` was not moved out of the shared model store,
+  which other projects link to; `--model` pointed at a scratch folder
+  linking the other three files instead.
+- Step 3: `push-stt.sh` also deletes a `mimi.safetensors` left in the
+  staging or app directory by an older push, and copies only the files it
+  pushed.
+- The S23's load was 15.3 s against 12.2 s before, inside the 13.9–21 s
+  seen across plan 05; memory fell by 152 MB.
