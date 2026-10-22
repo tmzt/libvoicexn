@@ -24,6 +24,7 @@ use libmsdf::font::{
 use crate::ui::{Layout, Line, SPOKEN, Screen, wrap};
 #[cfg(feature = "stt-moshi-xn")]
 use crate::ui::{MUTED, TEXT};
+use libvoicexn::config::TtsConfig;
 #[cfg(feature = "stt-moshi-xn")]
 use libvoicexn::stt;
 use libvoicexn::tts::{TtsEvent, TtsRequest, TtsWorker};
@@ -55,6 +56,16 @@ fn model_dir(ctx: &MorphContext, name: &str) -> PathBuf {
         Some(dir) if name == "phonon-31m-en" => PathBuf::from(dir),
         _ => PathBuf::from("models").join(name),
     }
+}
+
+/// `--quant`'s value, logging what it takes when it is not one.
+#[cfg(feature = "stt-moshi-xn")]
+pub fn parse_quant(name: &str) -> Option<libvoicexn::config::SttQuant> {
+    let quant = libvoicexn::config::SttQuant::parse(name);
+    if quant.is_none() {
+        log::error!("--quant {name:?}: one of q4k, q4_0, q8");
+    }
+    quant
 }
 
 pub struct App {
@@ -269,7 +280,7 @@ impl MorphApp for App {
             screen: Screen::new(),
             #[cfg(feature = "stt-moshi-xn")]
             next_frame: Instant::now(),
-            tts: TtsWorker::spawn(model, playback, None),
+            tts: TtsWorker::spawn(TtsConfig::for_platform(model), playback),
             status: "loading\u{2026}".into(),
             history: VecDeque::new(),
             #[cfg(feature = "stt-moshi-xn")]
@@ -305,9 +316,23 @@ impl MorphApp for App {
         // Four seconds of 24 kHz mono, read by the stt thread every frame.
         let (sink, capture) = morph::capture(format, self.speaking.clone(), 4);
         ctx.audio().add_sink(sink);
-        let model = model_dir(ctx, "stt-1b-en_fr");
-        log::info!("stt: loading {}", model.display());
-        self.stt = Some(stt::SttWorker::spawn(model, capture));
+        let mut config =
+            libvoicexn::config::SttConfig::for_platform(model_dir(ctx, "stt-1b-en_fr"));
+        // `--quant` on the desktop; Android has no arguments.
+        let args = ctx.args();
+        let flag = args.iter().position(|a| a == "--quant");
+        if let Some(quant) = flag
+            .and_then(|i| args.get(i + 1))
+            .and_then(|q| parse_quant(q))
+        {
+            config.quant = quant;
+        }
+        log::info!(
+            "stt: loading {} ({:?})",
+            config.model_dir.display(),
+            config.quant
+        );
+        self.stt = Some(stt::SttWorker::spawn(config, capture));
         self.stt_status = "loading STT\u{2026}".into();
     }
 
@@ -422,7 +447,8 @@ fn android_main(app: libmorph::AndroidApp) {
     let threads = option_env!("VOICEXN_THREADS").unwrap_or(default);
     // SAFETY: no other thread has started yet.
     unsafe { std::env::set_var("RAYON_NUM_THREADS", threads) };
-    // VOICEXN_STT_QUANT at build time picks the STT model's quantization.
+    // VOICEXN_STT_QUANT at build time overrides the platform's q4k, through
+    // SttConfig::for_platform.
     #[cfg(feature = "stt-moshi-xn")]
     if let Some(quant) = option_env!("VOICEXN_STT_QUANT") {
         // SAFETY: as above.

@@ -2,13 +2,14 @@
 //! `--say "<text>"`, one utterance written to `out/tts/<unix ms>.wav`.
 //!
 //! ```text
-//! cargo run --release -- --say "Hello from voicexn." [--model <dir>] [--voice <name>]
-//! cargo run --release --features stt-moshi-xn -- --transcribe <wav> [--model <dir>]
+//! cargo run --release -p voicexn -- --say "Hello from voicexn." [--model <dir>] [--voice <name>]
+//! cargo run --release -p voicexn --features stt-moshi-xn -- --transcribe <wav> [--model <dir>] [--quant q4k|q4_0|q8]
 //! ```
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use libvoicexn::config::TtsConfig;
 use libvoicexn::tts::{TtsEvent, TtsRequest, TtsWorker};
 
 const MODEL_DIR: &str = "models/phonon-31m-en";
@@ -49,7 +50,9 @@ fn say(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let worker = TtsWorker::spawn(model, None, Some(PathBuf::from("out/tts")));
+    let mut config = TtsConfig::for_platform(model);
+    config.record = Some(PathBuf::from("out/tts"));
+    let worker = TtsWorker::spawn(config, None);
     worker.send(TtsRequest::Speak { text, voice });
     while let Some(event) = worker.wait() {
         match event {
@@ -80,19 +83,27 @@ fn say(args: &[String]) -> ExitCode {
 #[cfg(feature = "stt-moshi-xn")]
 fn transcribe(args: &[String]) -> ExitCode {
     let mut wav = None;
-    let mut model = PathBuf::from("models/stt-1b-en_fr");
+    let mut config = libvoicexn::config::SttConfig::for_platform("models/stt-1b-en_fr");
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--model" => model = args.next().map_or(model, PathBuf::from),
+            "--model" => {
+                if let Some(dir) = args.next() {
+                    config.model_dir = PathBuf::from(dir);
+                }
+            }
+            "--quant" => match args.next().and_then(|q| voicexn::parse_quant(q)) {
+                Some(quant) => config.quant = quant,
+                None => return ExitCode::FAILURE,
+            },
             _ => wav = Some(PathBuf::from(arg)),
         }
     }
     let Some(wav) = wav else {
-        log::error!("usage: voicexn --transcribe <wav> [--model <dir>]");
+        log::error!("usage: voicexn --transcribe <wav> [--model <dir>] [--quant q4k|q4_0|q8]");
         return ExitCode::FAILURE;
     };
-    match libvoicexn::stt::transcribe_file(&model, &wav) {
+    match libvoicexn::stt::transcribe_file(&config, &wav) {
         Ok(text) => {
             println!("{text}");
             ExitCode::SUCCESS
