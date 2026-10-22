@@ -4,6 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+use crate::config::{SttConfig, SttQuant};
 use crate::playback::Resampler;
 
 /// Mimi's input rate.
@@ -67,13 +68,6 @@ where
     }
 }
 
-/// The LM's quantization, from `VOICEXN_STT_QUANT`: `q4k` (the default,
-/// `model.q4k.gguf`), `q4_0`, or `q8_0` (`model.q8.gguf`). q4k is the one
-/// that keeps up on the S23 (CHANGES.md, 2026-10-22).
-pub fn quant() -> String {
-    std::env::var("VOICEXN_STT_QUANT").unwrap_or_else(|_| "q4k".into())
-}
-
 /// Kyutai STT on the CPU: the LM from a quantized GGUF, Mimi from
 /// `mimi.safetensors` (the GGUF leaves out Mimi's decoder, which
 /// `Mimi::load` builds too).
@@ -102,9 +96,11 @@ pub struct Step {
 }
 
 impl Stt {
-    pub fn load(dir: &std::path::Path) -> Result<Self, String> {
+    pub fn load(settings: &SttConfig) -> Result<Self, String> {
         use xn::nn::VB;
         use xn_moshi::{lm::LmModel, mimi::Mimi, moshi};
+
+        let dir = &settings.model_dir;
 
         let fail =
             |what: &str, e: &dyn std::fmt::Display| format!("{}: {what}: {e}", dir.display());
@@ -128,11 +124,10 @@ impl Stt {
             VB::load(&[dir.join("mimi.safetensors")], xn::CPU).map_err(|e| fail("mimi", &e))?;
         let mimi: Mimi<f32, xn::CpuDevice> =
             Mimi::load(&mimi_vb.root(), mimi_config).map_err(|e| fail("mimi", &e))?;
-        let quant = quant();
-        let file = format!("model.{}.gguf", if quant == "q8_0" { "q8" } else { &quant });
-        let gguf = std::fs::File::open(dir.join(&file)).map_err(|e| fail(&file, &e))?;
+        let file = settings.quant.file();
+        let gguf = std::fs::File::open(dir.join(file)).map_err(|e| fail(file, &e))?;
         let lm_vb =
-            VB::load_gguf(std::io::BufReader::new(gguf), xn::CPU).map_err(|e| fail(&file, &e))?;
+            VB::load_gguf(std::io::BufReader::new(gguf), xn::CPU).map_err(|e| fail(file, &e))?;
         let lm_vb = lm_vb.root().pp("lm");
         let lm_config = config.to_lm_config();
         fn state<Q: xn::BackendQ<T = f32, B = xn::CpuDevice>>(
@@ -148,20 +143,20 @@ impl Stt {
             let asr = xn_moshi::asr::Asr::new(delay, 0.0, mimi, lm);
             Ok(Box::new(asr.init_state(1)?))
         }
-        let state = match quant.as_str() {
-            "q8_0" => state::<xn::quantized::Q80F32>(&lm_vb, &lm_config, asr_delay_in_tokens, mimi),
-            "q4_0" => state::<xn::quantized::Q40F32>(&lm_vb, &lm_config, asr_delay_in_tokens, mimi),
-            "q4k" => state::<xn::quantized::Q4kF32>(&lm_vb, &lm_config, asr_delay_in_tokens, mimi),
-            other => return Err(format!("unknown VOICEXN_STT_QUANT {other:?}")),
+        let delay = asr_delay_in_tokens;
+        let state = match settings.quant {
+            SttQuant::Q8_0 => state::<xn::quantized::Q80F32>(&lm_vb, &lm_config, delay, mimi),
+            SttQuant::Q4_0 => state::<xn::quantized::Q40F32>(&lm_vb, &lm_config, delay, mimi),
+            SttQuant::Q4k => state::<xn::quantized::Q4kF32>(&lm_vb, &lm_config, delay, mimi),
         }
         .map_err(|e| fail("lm", &e))?;
         log::info!("stt: LM {file}");
         #[cfg(feature = "stt-moshi-xn-boost")]
         let mut state = state;
         #[cfg(feature = "stt-moshi-xn-boost")]
-        if let Some(path) = crate::boost::find_vocab(dir) {
-            let phrases = crate::boost::read_vocab(&path).map_err(|e| fail("vocab", &e))?;
-            let (start, cont) = crate::boost::VocabBooster::biases();
+        if let Some(path) = &settings.vocab {
+            let phrases = crate::boost::read_vocab(path).map_err(|e| fail("vocab", &e))?;
+            let (start, cont) = settings.boost;
             let booster = crate::boost::VocabBooster::from_phrases(&decoder, &phrases, start, cont);
             log::info!(
                 "stt: boosting {} phrases ({} token sequences) from {}, start {start}, cont {cont}",
@@ -222,12 +217,12 @@ impl Stt {
 /// Loads the model and transcribes a WAV file the way xn-moshi's `run_asr`
 /// does: two frames of silence before it, and the ASR delay's worth after.
 /// Logs each word as it comes and the step times against the 80 ms budget.
-pub fn transcribe_file(model: &std::path::Path, wav: &std::path::Path) -> Result<String, String> {
+pub fn transcribe_file(config: &SttConfig, wav: &std::path::Path) -> Result<String, String> {
     use std::time::Instant;
 
     let pcm = read_wav(wav).map_err(|e| format!("{}: {e}", wav.display()))?;
     let start = Instant::now();
-    let mut stt = Stt::load(model)?;
+    let mut stt = Stt::load(config)?;
     let load_ms = start.elapsed().as_millis();
     let audio = [
         vec![0.0; FRAME * 2],
@@ -251,7 +246,7 @@ pub fn transcribe_file(model: &std::path::Path, wav: &std::path::Path) -> Result
     sorted.sort_by(f64::total_cmp);
     log::info!(
         "stt: {} load {load_ms} ms, {} steps, step mean {mean:.1} ms, p95 {:.1} ms, max {:.1} ms (budget 80 ms), {} threads",
-        quant(),
+        config.quant.file(),
         steps.len(),
         sorted[sorted.len() * 95 / 100],
         sorted[sorted.len() - 1],
@@ -402,14 +397,14 @@ pub struct SttWorker {
 }
 
 impl SttWorker {
-    pub fn spawn(model_dir: std::path::PathBuf, capture: Capture) -> Self {
+    pub fn spawn(config: SttConfig, capture: Capture) -> Self {
         let (events, rx) = std::sync::mpsc::channel();
         #[cfg(feature = "vad-earshot")]
         let (tx, requests) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("stt".into())
             .spawn(move || {
-                let Some(mut listener) = Listener::load(&model_dir, capture, events) else {
+                let Some(mut listener) = Listener::load(&config, capture, events) else {
                     return;
                 };
                 #[cfg(feature = "vad-earshot")]
@@ -453,12 +448,12 @@ struct Gone;
 
 impl Listener {
     fn load(
-        model_dir: &std::path::Path,
+        config: &SttConfig,
         mut capture: Capture,
         events: std::sync::mpsc::Sender<SttEvent>,
     ) -> Option<Self> {
         let start = std::time::Instant::now();
-        let stt = match Stt::load(model_dir) {
+        let stt = match Stt::load(config) {
             Ok(stt) => stt,
             Err(e) => {
                 let _ = events.send(SttEvent::LoadFailed(e));

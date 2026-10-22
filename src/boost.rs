@@ -2,7 +2,7 @@
 //! a `TokenBooster` that nudges Kyutai STT toward the token sequences of
 //! the phrases in a list, as it writes them.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::spm::Decoder;
 
@@ -28,17 +28,6 @@ pub struct VocabBooster {
 }
 
 impl VocabBooster {
-    /// `start` and `cont` from `VOICEXN_BOOST=start,cont`, else the defaults.
-    pub fn biases() -> (f32, f32) {
-        std::env::var("VOICEXN_BOOST")
-            .ok()
-            .and_then(|v| {
-                let (a, b) = v.split_once(',')?;
-                Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
-            })
-            .unwrap_or((START, CONT))
-    }
-
     pub fn new(phrases: Vec<Vec<u32>>, word_starts: Vec<bool>, start: f32, cont: f32) -> Self {
         Self {
             phrases: phrases.into_iter().filter(|p| !p.is_empty()).collect(),
@@ -130,21 +119,6 @@ impl xn_moshi::asr::TokenBooster for VocabBooster {
         }
         biases
     }
-}
-
-/// The phrase list: `VOICEXN_VOCAB`, else `vocab.txt` in the working
-/// directory (the desktop), else `vocab.txt` next to the model folder
-/// (Android's data directory).
-pub fn find_vocab(model_dir: &Path) -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("VOICEXN_VOCAB") {
-        return Some(PathBuf::from(path));
-    }
-    [
-        PathBuf::from("vocab.txt"),
-        model_dir.parent()?.join("vocab.txt"),
-    ]
-    .into_iter()
-    .find(|p| p.is_file())
 }
 
 /// One phrase per line; blank lines and `#` comments are skipped.

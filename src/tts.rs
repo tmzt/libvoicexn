@@ -3,15 +3,16 @@
 //! must come from one thread, so nothing else touches the model.
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ptts::checkpoint::{Checkpoint, ResolveOptions};
 use ptts::preprocess::Lang;
-use ptts::synth::{DeviceKind, Quant, SpeechOptions, Synth};
+use ptts::synth::{DeviceKind, SpeechOptions, Synth};
 
+use crate::config::TtsConfig;
 use crate::playback::Producer;
 
 pub enum TtsRequest {
@@ -56,22 +57,22 @@ pub struct TtsWorker {
 }
 
 impl TtsWorker {
-    /// Starts the thread, which loads the checkpoint in `model_dir`. Audio
-    /// goes to `playback` as it is made. With `record`, each utterance is
-    /// also written to `<record>/<unix ms>.wav`.
-    pub fn spawn(model_dir: PathBuf, playback: Option<Producer>, record: Option<PathBuf>) -> Self {
+    /// Starts the thread, which loads the checkpoint in `config.model_dir`.
+    /// Audio goes to `playback` as it is made. With `config.record`, each
+    /// utterance is also written to `<record>/<unix ms>.wav`.
+    pub fn spawn(config: TtsConfig, playback: Option<Producer>) -> Self {
         let (tx, requests) = mpsc::channel();
         let (events, rx) = mpsc::channel();
         thread::Builder::new()
             .name("tts".into())
             .spawn(move || {
                 let start = Instant::now();
-                let tts = match load(&model_dir) {
+                let tts = match load(&config) {
                     Ok(tts) => tts,
                     Err(e) => {
                         let _ = events.send(TtsEvent::LoadFailed(format!(
                             "{}: {e}",
-                            model_dir.display()
+                            config.model_dir.display()
                         )));
                         return;
                     }
@@ -83,7 +84,7 @@ impl TtsWorker {
                 Worker {
                     tts,
                     playback,
-                    record,
+                    record: config.record,
                     requests,
                     pending: VecDeque::new(),
                     events,
@@ -109,11 +110,11 @@ impl TtsWorker {
     }
 }
 
-fn load(model_dir: &Path) -> ptts::Result<Synth> {
+fn load(config: &TtsConfig) -> ptts::Result<Synth> {
     let checkpoint = Checkpoint::resolve(
-        model_dir,
+        &config.model_dir,
         ResolveOptions {
-            quant: Quant::Q80,
+            quant: config.quant,
             weights: None,
         },
     )?;
