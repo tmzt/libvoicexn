@@ -271,3 +271,17 @@ Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 3, in
   step 4 measures it.
 - `android_main` still copies a build-time `VOICEXN_STT_QUANT` into the
   environment, where `for_platform` reads it.
+
+## 2026-10-22 13:51 EDT — libvoicexn split, step 4: q4k on the desktop, by the owner's decision
+
+Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 4 and
+decision 5, in `bd274ad` and `0750a89`.
+- The owner (2026-10-22): "we won't be able to use q8 on mobile, so we
+  should optimize getting q4k working". `SttQuant::DESKTOP` is `Q4k`, not
+  the decision's provisional `Q8_0`. The A/B on the three plan 04 sentences
+  (q4k mean 18 ms, q8 25–28 ms, transcripts tied) is logged; the one-minute
+  recording of step 4 was not made, as the choice no longer rests on it.
+- `scripts/fetch-stt.sh` builds q4k only by default, undoing step 3's
+  `q4k q8`. `--quant` and `VOICEXN_STT_QUANT` still take q8_0 and q4_0.
+- Boost tuning moves to another app of the owner's; `stt-moshi-xn-boost`
+  here stays the example that shows it works.
