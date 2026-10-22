@@ -172,3 +172,10 @@ automatically when it ends, and a tap repeats the last one. Departures:
 - Thermal: after about an hour of back-to-back runs the S23 reached thermal
   status 3 (SEVERE, AP 68 °C, skin 45 °C), and the live step rose to
   81–141 ms. Cooled to status 1 with the 15 fps cap, it steps at 60–66 ms.
+
+## 2026-10-22 10:18 EDT — Tap to talk with earshot VAD plan
+
+New planned work on `feat-moshi-xn`: a `vad-earshot` feature (on top of
+`stt-moshi-xn`) that uses the pure-Rust `earshot` 1.2.2 VAD. A tap arms,
+earshot opens and closes the gate, and the STT model is idle between turns.
+Plan: `docs/design/20261022_03_VAD_TOUCH_GATE_PLAN.md` (Draft), two steps.
