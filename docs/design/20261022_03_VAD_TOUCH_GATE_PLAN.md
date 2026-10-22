@@ -1,7 +1,7 @@
 ---
 title: Tap to talk, gated by earshot voice activity detection
 date: 2026-10-22
-status: Draft
+status: In implementation
 covers:
   - A cargo feature `vad-earshot`, on top of `stt-moshi-xn`, that adds the
     `earshot` crate (pure Rust, no ONNX)
@@ -102,3 +102,10 @@ listening.
 1. Are the thresholds (0.5 to open, 0.35 for 800 ms to close) and the 6 s
    timeout right? They are earshot's suggested threshold and common VAD
    timings, still to be tuned on the phone.
+
+## Amendment — 2026-10-22 10:19 EDT: implementation has started; the document is now immutable
+
+The owner asked for the feature, named `vad-earshot`. Status moves from
+`Draft` to `In implementation` in the commit that implements step 1.
+From here this document changes only on the owner's explicit instruction
+(AGENTS.md Rule 1.5).

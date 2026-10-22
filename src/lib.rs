@@ -11,6 +11,8 @@ pub mod spm;
 pub mod stt;
 pub mod tts;
 pub mod ui;
+#[cfg(feature = "vad-earshot")]
+pub mod vad;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;

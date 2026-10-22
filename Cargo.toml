@@ -26,6 +26,8 @@ rtrb = "0.3"
 xn-moshi = { version = "0.2.6", optional = true }
 xn = { version = "0.2.12", optional = true }
 serde_json = { version = "1", optional = true }
+# Voice activity detection in pure Rust (plan 20261022_03), behind `vad-earshot`.
+earshot = { version = "1.2.2", optional = true }
 # Phonon on xn, CPU only; `hf` reads the checkpoint's tokenizer.json.
 # 0.4.1 (tag v0.4.1) is not on crates.io yet.
 ptts = { git = "https://github.com/gradium-ai/xn-ptts", rev = "49b9033e44ab0fbb935973eca3213757644d1bbb", features = ["hf"] }
@@ -34,6 +36,8 @@ ptts = { git = "https://github.com/gradium-ai/xn-ptts", rev = "49b9033e44ab0fbb9
 default = []
 # Live speech-to-text with Kyutai's stt-1b-en_fr on xn-moshi.
 stt-moshi-xn = ["dep:xn-moshi", "dep:xn", "dep:serde_json"]
+# Tap to talk: earshot opens and closes the gate to the STT model.
+vad-earshot = ["stt-moshi-xn", "dep:earshot"]
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 env_logger = "0.11"
