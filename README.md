@@ -16,4 +16,4 @@ logged in [CHANGES.md](CHANGES.md).
 
 | Document | Date | Status | Decision |
 |---|---|---|---|
-| [Phonon 31m text-to-speech on Android](docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md) | 2026-10-22 | Draft | One libmorph app calls `ptts` (xn, CPU, q8) on its own thread and streams 24 kHz chunks, resampled, into a libmorph audio source, behind a libcontrols screen of preset phrases. The checkpoint is pushed over adb. Drafted for the owner's review; STT is deferred to its own plan. |
+| [Phonon 31m text-to-speech on Android](docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md) | 2026-10-22 | In implementation | One libmorph app calls `ptts` (xn, CPU, q8) on its own thread and streams 24 kHz chunks, resampled, into a libmorph audio source, behind a libcontrols screen of preset phrases; voices are the web demo's short list. The checkpoint is pushed over adb. The owner asked to start; step 1 is the first implementing commit. STT is deferred to its own plan. |

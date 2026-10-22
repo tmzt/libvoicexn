@@ -1,7 +1,7 @@
 ---
 title: Phonon 31m text-to-speech on Android
 date: 2026-10-22
-status: Draft
+status: In implementation
 covers:
   - The voicexn application crate: one libmorph app that runs on the
     desktop and as an Android `NativeActivity`
@@ -255,3 +255,10 @@ so xn compiles the same q8 kernels on the Mac as on the phone with no
 rustflags. `.cargo/config.toml` sets nothing for it. The timings logged in
 step 2 are therefore a fair preview of the phone's kernels, but not of its
 speed.
+
+## Amendment — 2026-10-22 08:54 EDT: implementation has started; the document is now immutable
+
+The owner asked to start. Status moves from `Draft` to `In implementation`
+in the commit that implements step 1. From here this document changes only
+on the owner's explicit instruction (AGENTS.md Rule 1.5); departures are
+recorded in `CHANGES.md`.

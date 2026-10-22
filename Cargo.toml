@@ -1,0 +1,36 @@
+[package]
+name = "voicexn"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "A minimal realtime speech example: Phonon text-to-speech on xn, in a libmorph app"
+
+[lib]
+name = "voicexn"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "voicexn"
+path = "src/main.rs"
+
+[dependencies]
+libmorph = { git = "https://github.com/tmzt/libmorph", rev = "bb0174d14f77e4b54a250e78293b3a9cb4a6617a" }
+# The revision libcontrols pins, so the graph holds one libmsdf.
+libmsdf = { git = "https://github.com/tmzt/libmsdf", rev = "b48d0664a4222ffd1fe505962d13459fbadb5034", features = ["font-apache-roboto-regular"] }
+libcontrols = { git = "https://github.com/tmzt/libcontrols", rev = "ccb783dd64b88d3d7ad20d07b7919a5177ab332d" }
+log = "0.4"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+env_logger = "0.11"
+
+[target.'cfg(target_os = "android")'.dependencies]
+libmorph = { git = "https://github.com/tmzt/libmorph", rev = "bb0174d14f77e4b54a250e78293b3a9cb4a6617a", features = ["mobile"] }
+android_logger = "0.14"
+
+# Generates the Gradle project when building for Android; a no-op on the host.
+[build-dependencies]
+libmorph-build = { git = "https://github.com/tmzt/libmorph", rev = "bb0174d14f77e4b54a250e78293b3a9cb4a6617a" }
+
+[profile.dev.package."*"]
+opt-level = 2
