@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build voicexn for Android, and optionally install and launch it.
+# Build the voicexn example (examples/voicexn) for Android, and optionally
+# install and launch it.
 #
 #   scripts/android.sh [--install] [-- <extra cargo args>]
 #
@@ -55,7 +56,7 @@ export AR_aarch64_linux_android="$LLVM/llvm-ar"
 unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
 
 echo "==> cargo build ($TARGET, release)"
-cargo build --manifest-path "$ROOT/Cargo.toml" --lib --release --target "$TARGET" ${CARGO_EXTRA[@]+"${CARGO_EXTRA[@]}"}
+cargo build --manifest-path "$ROOT/Cargo.toml" -p voicexn --lib --release --target "$TARGET" ${CARGO_EXTRA[@]+"${CARGO_EXTRA[@]}"}
 
 PROJECT="$ROOT/target/$TARGET/release/gradle/voicexn"
 echo "==> gradle assembleDebug ($PROJECT)"
