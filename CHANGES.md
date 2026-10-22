@@ -216,3 +216,29 @@ Departures:
 - Decision 3: the encoder is `Decoder::encode` on the existing type, not a
   new `spm::Model`.
 - `find_vocab` also takes `VOICEXN_VOCAB`.
+
+## 2026-10-22 13:31 EDT — libvoicexn split, step 1: the workspace and the move
+
+Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 1, in
+`c47bc3e`, `7a25534`, `ceb8f54` and `a3528ec`.
+- Decision 1: where plans 01 to 04 name the `voicexn` crate, the app
+  (`lib.rs`'s `App` and `android_main`, `ui.rs`, `main.rs`,
+  `build.rs`) is now `examples/voicexn`, and the engine (`tts`,
+  `stt`, `spm`, `boost`, `vad`, `playback`) is `libvoicexn` at the
+  root. Log targets follow: the engine logs as `libvoicexn::stt`, the app
+  as `voicexn`.
+
+Departures:
+- Step 1.1: `build.rs`'s `lib_name` followed the lib to `libvoicexn`,
+  and libmorph-build names the Gradle project after the package, so
+  between 1.1 and 1.2 the project was `gradle/libvoicexn` and
+  `scripts/android.sh` did not find it. 1.2 and the `-p voicexn` commit
+  put it back at `gradle/voicexn`. Between 1.2 and 1.3 the root and the
+  example each had a bin named `voicexn`.
+- Step 1's **Done when:** "sample-equal" does not hold as written: Phonon's
+  `SpeechOptions::default()` has no seed, and two runs of the old build
+  differ (72 bytes of one 3.4 s WAV). The check was made with an
+  uncommitted `.seed(0)` in both trees and `RAYON_NUM_THREADS=1`: the
+  example's WAV equals the old build's byte for byte, and the old build
+  still differed from itself by 41 bytes in one of two runs. The
+  `--transcribe` text of `out/boost/s1–s3.wav` is identical.
