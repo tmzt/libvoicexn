@@ -355,3 +355,12 @@ Plan `docs/design/20261022_06_MIMI_ENCODER_ONLY_PLAN.md`; `5d994ac` in
   pushed.
 - The S23's load was 15.3 s against 12.2 s before, inside the 13.9–21 s
   seen across plan 05; memory fell by 152 MB.
+
+## 2026-10-22 16:27 EDT — Runtime vocabulary plan
+
+New planned work, asked for by handlr's companion apps with the owner's
+approval: replace the STT boost's phrase list on a running `SttWorker`
+(`SttRequest::Vocabulary`, `SttEvent::Vocabulary`), encoded off the stt
+thread and applied only between utterances, as libvoicexn 0.3.0.
+Plan: `docs/design/20261022_07_STT_RUNTIME_VOCAB_PLAN.md` (Draft), five
+steps. Not started: it is for the owner's review first.
