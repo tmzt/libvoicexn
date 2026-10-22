@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Download Phonon 31m and the web demo's voices into models/phonon-31m-en/.
+# Download Phonon 31m and the web demo's voices into the shared model store,
+# $COMMON_MODELS/phonon-31m-en (default ~/src/common-models), and link
+# models/phonon-31m-en to it.
 #
-#   scripts/fetch-model.sh [<dir>]
+#   scripts/fetch-model.sh
 #
 # Both repositories are pinned. The weights, tokenizer and voices are
 # Apache-2.0 (huggingface.co/gradium/phonon-31m-en). Files already present
@@ -9,7 +11,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIR="${1:-$ROOT/models/phonon-31m-en}"
+DIR="${COMMON_MODELS:-$HOME/src/common-models}/phonon-31m-en"
 MODEL=https://huggingface.co/gradium/phonon-31m-en/resolve/92741c5b07d085ff840e26fea8ce43110b87852f
 VOICES=https://huggingface.co/gradium/phonon-voices/resolve/da6c9ec0d47be8df5c87c730a3aa97187f3229c3
 
@@ -27,4 +29,6 @@ while IFS=$'\t' read -r name _ file; do
     [[ -z "$name" || "$name" == \#* ]] && continue
     fetch "$VOICES/$file" "$DIR/voices/$name.safetensors"
 done < "$ROOT/scripts/voices.tsv"
+mkdir -p "$ROOT/models"
+ln -sfn "$DIR" "$ROOT/models/phonon-31m-en"
 echo "==> $DIR: $(ls "$DIR/voices" | wc -l | tr -d ' ') voices, $(du -sh "$DIR" | cut -f1)"
