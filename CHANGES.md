@@ -92,3 +92,31 @@ Plan `docs/design/20261022_02_STT_MOSHI_XN_PLAN.md`, step 1:
 - `playback::Consumer::speaking()` is the shared flag of decision 6. It is
   set after every fill that played something.
 - Until step 3, `App::update` empties the capture ring each frame.
+
+## 2026-10-22 09:36 EDT — STT plan, step 2: the phone misses the 80 ms budget; stopped
+
+Plan `docs/design/20261022_02_STT_MOSHI_XN_PLAN.md`, step 2. The step's own
+gate stops the plan here, and the result goes to the owner.
+- The transcript is right on both machines. Phonon's demo sentence comes
+  back as "Phone on turns, text into natural speech, write on your device
+  with no cloud round trip."
+- M4: load 2.6–3.4 s. Mean step 31.5 / 26.5 / 22.4 / 26.0 ms at 1 / 2 / 4 / 8
+  threads, and 67 ms with rayon's default of every core.
+- S23 Ultra, five runs started 10 s after Phonon loaded: load 7.3–10.3 s.
+  Mean step 93.6 ms at 2 threads, 132.9 and 82.3 ms at 3, 104.0 and 83.5 ms
+  at 4. p95 107–396 ms. None is under the 80 ms frame.
+
+Departures in the step-2 code:
+- `model.q8.gguf` holds the LM's q8_0 linears and Mimi's *encoder*. xn-moshi's
+  quantizer leaves out everything under `mimi.decoder*` and `mimi.upsample`,
+  and `Mimi::load` builds the decoder too. So Mimi loads from
+  `mimi.safetensors` and the LM from the GGUF (`VB::load_gguf`,
+  `.pp("lm")`, `Q80F32`). The phone holds both, 1.6 GB.
+- xn-moshi 0.2.6 on crates.io has no `Config::asr_delay_in_tokens`. The delay
+  is `stt_config.audio_delay_seconds` × 12.5 (6 frames).
+- `xn` and `serde_json` are direct optional dependencies of the feature.
+- The phone's debug hook is a `transcribe.wav` in the data directory,
+  transcribed 10 s after launch, rather than app arguments. A build-time
+  `VOICEXN_THREADS` sets `RAYON_NUM_THREADS` (default 2) for the comparison.
+- `scripts/push-stt.sh` stages each file, skips files already there at full
+  size, and retries, because wireless adb dropped the 1.4 GB push twice.
