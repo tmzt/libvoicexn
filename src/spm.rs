@@ -1,8 +1,10 @@
-//! Decoding SentencePiece ids to text, in Rust (plan 20261022_02,
-//! decision 7). A `.model` file is a protobuf `ModelProto` whose field 1
+//! SentencePiece in Rust: decoding ids to text (plan 20261022_02,
+//! decision 7), and unigram encoding of text to ids (plan 20261022_04,
+//! decision 3). A `.model` file is a protobuf `ModelProto` whose field 1
 //! repeats `SentencePiece { piece: string = 1, score: float = 2, type:
-//! enum = 3 }`; this reads only those pieces. It does not encode.
+//! enum = 3 }`; this reads only those pieces.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 /// `SentencePiece.Type` values that decode to something other than the
@@ -24,7 +26,16 @@ enum Piece {
 
 pub struct Decoder {
     pieces: Vec<Piece>,
+    /// Text pieces by their text, with id and score, for encoding.
+    vocab: HashMap<String, (u32, f32)>,
+    /// The `<0xNN>` piece of each byte, for characters no piece covers.
+    bytes: [Option<u32>; 256],
+    /// The longest text piece, in characters.
+    max_chars: usize,
 }
+
+/// The score of a character spelt in byte pieces, below any real piece.
+const BYTE_FALLBACK_SCORE: f32 = -100.0;
 
 #[derive(Debug)]
 pub struct Error(String);
@@ -97,21 +108,25 @@ enum Value<'a> {
     Bytes(&'a [u8]),
 }
 
-fn piece(bytes: &[u8]) -> Result<Piece, Error> {
+fn piece(bytes: &[u8]) -> Result<(Piece, f32), Error> {
     let mut text = None;
     let mut kind = 1;
+    let mut score = 0.0;
     let mut fields = Fields(bytes);
     while let Some(field) = fields.next() {
         match field? {
             (1, Value::Bytes(b)) => {
                 text = Some(String::from_utf8(b.to_vec()).map_err(|_| err("piece is not UTF-8"))?);
             }
+            (2, Value::Bytes(b)) if b.len() == 4 => {
+                score = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+            }
             (3, Value::Varint(v)) => kind = v,
             _ => {}
         }
     }
     let text = text.ok_or_else(|| err("piece without text"))?;
-    Ok(match kind {
+    let piece = match kind {
         UNKNOWN | CONTROL => Piece::Empty,
         BYTE => text
             .strip_prefix("<0x")
@@ -119,22 +134,41 @@ fn piece(bytes: &[u8]) -> Result<Piece, Error> {
             .and_then(|hex| u8::from_str_radix(hex, 16).ok())
             .map_or(Piece::Empty, Piece::Byte),
         _ => Piece::Text(text),
-    })
+    };
+    Ok((piece, score))
 }
 
 impl Decoder {
     pub fn from_bytes(model: &[u8]) -> Result<Self, Error> {
         let mut pieces = Vec::new();
+        let mut vocab = HashMap::new();
+        let mut bytes = [None; 256];
+        let mut max_chars = 1;
         let mut fields = Fields(model);
         while let Some(field) = fields.next() {
             if let (1, Value::Bytes(b)) = field? {
-                pieces.push(piece(b)?);
+                let (piece, score) = piece(b)?;
+                let id = pieces.len() as u32;
+                match &piece {
+                    Piece::Text(text) => {
+                        max_chars = max_chars.max(text.chars().count());
+                        vocab.insert(text.clone(), (id, score));
+                    }
+                    Piece::Byte(b) => bytes[usize::from(*b)] = Some(id),
+                    Piece::Empty => {}
+                }
+                pieces.push(piece);
             }
         }
         if pieces.is_empty() {
             return Err(err("no pieces"));
         }
-        Ok(Self { pieces })
+        Ok(Self {
+            pieces,
+            vocab,
+            bytes,
+            max_chars: max_chars.min(16),
+        })
     }
 
     pub fn open(path: &Path) -> Result<Self, Error> {
@@ -164,6 +198,59 @@ impl Decoder {
         let text = String::from_utf8_lossy(&bytes).replace(SPACE, " ");
         text.trim_start_matches(' ').to_string()
     }
+
+    /// The ids of `text` as the unigram model segments it: the split into
+    /// pieces with the largest total score, of `▁` + `text` with spaces as
+    /// `▁`. A character no piece covers is spelt in byte pieces, and
+    /// dropped if the model has none for it.
+    pub fn encode(&self, text: &str) -> Vec<u32> {
+        let text: String = std::iter::once(SPACE)
+            .chain(text.chars().map(|c| if c == ' ' { SPACE } else { c }))
+            .collect();
+        let starts: Vec<usize> = text
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain([text.len()])
+            .collect();
+        let n = starts.len() - 1;
+        // best[i]: the best score of the first i characters, and the step
+        // that reached it (where it came from and the ids it added).
+        let mut best: Vec<Option<(f32, usize, Vec<u32>)>> = vec![None; n + 1];
+        best[0] = Some((0.0, 0, Vec::new()));
+        for i in 0..n {
+            let Some((at, _, _)) = best[i] else {
+                continue;
+            };
+            let mut reach = |j: usize, score: f32, ids: Vec<u32>| {
+                if best[j].as_ref().is_none_or(|(s, _, _)| score > *s) {
+                    best[j] = Some((score, i, ids));
+                }
+            };
+            let mut covered = false;
+            for len in 1..=self.max_chars.min(n - i) {
+                let piece = &text[starts[i]..starts[i + len]];
+                if let Some(&(id, score)) = self.vocab.get(piece) {
+                    covered |= len == 1;
+                    reach(i + len, at + score, vec![id]);
+                }
+            }
+            if !covered {
+                let ids: Vec<u32> = text[starts[i]..starts[i + 1]]
+                    .bytes()
+                    .filter_map(|b| self.bytes[usize::from(b)])
+                    .collect();
+                reach(i + 1, at + BYTE_FALLBACK_SCORE, ids);
+            }
+        }
+        let mut ids = Vec::new();
+        let mut j = n;
+        while j > 0 {
+            let (_, i, step) = best[j].take().expect("every position is reachable");
+            ids.splice(0..0, step);
+            j = i;
+        }
+        ids
+    }
 }
 
 #[cfg(test)]
@@ -172,6 +259,11 @@ mod tests {
 
     /// Encodes a `ModelProto` with these pieces, as the protobuf would.
     fn model(pieces: &[(&str, u64)]) -> Vec<u8> {
+        let scored: Vec<_> = pieces.iter().map(|&(t, k)| (t, k, 0.5)).collect();
+        model_scored(&scored)
+    }
+
+    fn model_scored(pieces: &[(&str, u64, f32)]) -> Vec<u8> {
         fn varint(out: &mut Vec<u8>, mut v: u64) {
             while v >= 0x80 {
                 out.push((v as u8) | 0x80);
@@ -180,13 +272,13 @@ mod tests {
             out.push(v as u8);
         }
         let mut out = Vec::new();
-        for &(text, kind) in pieces {
+        for &(text, kind, score) in pieces {
             let mut p = Vec::new();
             p.push(1 << 3 | 2);
             varint(&mut p, text.len() as u64);
             p.extend_from_slice(text.as_bytes());
             p.push(2 << 3 | 5); // score, ignored
-            p.extend_from_slice(&0.5f32.to_le_bytes());
+            p.extend_from_slice(&score.to_le_bytes());
             p.push(3 << 3);
             varint(&mut p, kind);
             out.push(1 << 3 | 2);
@@ -222,14 +314,54 @@ mod tests {
         assert!(Decoder::from_bytes(&bytes[..bytes.len() - 6]).is_err());
     }
 
+    #[test]
+    fn the_best_segmentation_beats_the_greedy_one() {
+        let d = Decoder::from_bytes(&model_scored(&[
+            ("<unk>", UNKNOWN, 0.0),
+            ("\u{2581}", 1, -5.0),
+            ("\u{2581}ab", 1, -1.0),
+            ("c", 1, -9.0),
+            ("\u{2581}a", 1, -2.0),
+            ("bc", 1, -1.0),
+            ("a", 1, -5.0),
+            ("b", 1, -5.0),
+        ]))
+        .unwrap();
+        // Greedy longest-first would take ▁ab + c (-10); ▁a + bc is -3.
+        assert_eq!(d.encode("abc"), [4, 5]);
+        assert_eq!(d.decode(&d.encode("abc")), "abc");
+        assert_eq!(d.encode("ab"), [2]);
+    }
+
+    #[test]
+    fn characters_without_a_piece_fall_back_to_bytes() {
+        let d = Decoder::from_bytes(&model(&[
+            ("\u{2581}", 1),
+            ("<0xC3>", BYTE),
+            ("<0xA9>", BYTE),
+        ]))
+        .unwrap();
+        assert_eq!(d.encode("\u{e9}"), [0, 1, 2]);
+        assert_eq!(d.decode(&d.encode("\u{e9}")), "\u{e9}");
+    }
+
     /// Against the real tokenizer, when `scripts/fetch-stt.sh` has run.
     #[test]
-    fn the_stt_tokenizer_loads() {
+    fn the_stt_tokenizer_round_trips() {
         let path = Path::new("models/stt-1b-en_fr/tokenizer.model");
         if !path.exists() {
             return;
         }
         let d = Decoder::open(path).unwrap();
         assert_eq!(d.len(), 8000);
+        for s in [
+            "libmorph",
+            "Libmorph",
+            "libcontrols libmsdf libtypedmd",
+            "Phonon turns text into natural speech, right on your device.",
+        ] {
+            let ids = d.encode(s);
+            assert_eq!(d.decode(&ids), s, "{ids:?}");
+        }
     }
 }

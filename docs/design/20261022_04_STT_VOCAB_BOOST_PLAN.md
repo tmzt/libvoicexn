@@ -1,7 +1,7 @@
 ---
 title: Boosting a vocabulary list in Kyutai STT
 date: 2026-10-22
-status: Draft
+status: In implementation
 covers:
   - A cargo feature `stt-moshi-xn-boost`, on top of `stt-moshi-xn`, that
     biases the STT model's text tokens toward the phrases of a list
@@ -90,3 +90,10 @@ phrase per line. The boost is a feature, and without it nothing changes.
 ## 4. Open questions
 
 1. Are 1.5 and 4.0 right? Step 2's A/B gives the first measure.
+
+## Amendment — 2026-10-22 10:28 EDT: implementation has started; the document is now immutable
+
+The owner asked to try the list. Status moves from `Draft` to `In
+implementation` in the commit that implements step 1. From here this
+document changes only on the owner's explicit instruction (AGENTS.md Rule
+1.5).
