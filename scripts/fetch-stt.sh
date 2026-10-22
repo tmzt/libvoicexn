@@ -3,10 +3,14 @@
 # $COMMON_MODELS/stt-1b-en_fr (default ~/src/common-models), quantize it
 # there, and link models/stt-1b-en_fr to it:
 #   model.safetensors  mimi.safetensors   the checkpoint as published
-#   model.q8.gguf      the LM (q8_0 linears) and Mimi's encoder, one file
+#   model.q4k.gguf     the LM (q4k linears) and Mimi's encoder, one file
 #   config.json  tokenizer.model
 #
 #   scripts/fetch-stt.sh
+#   STT_QUANTS="q8_0 q4_0 q4k" scripts/fetch-stt.sh   # others besides q4k
+#
+# Each quantization is model.<quant>.gguf, except q8_0, which is
+# model.q8.gguf.
 #
 # The checkpoint and xn-moshi (whose `quantize` example does the
 # quantizing) are pinned. Files already present are kept.
@@ -29,7 +33,9 @@ fetch "$REPO/tokenizer_en_fr_audio_8000.model" "$DIR/tokenizer.model"
 fetch "$REPO/mimi-pytorch-e351c8d8@125.safetensors" "$DIR/mimi.safetensors"
 fetch "$REPO/model.safetensors" "$DIR/model.safetensors"
 
-if [[ ! -s "$DIR/model.q8.gguf" ]]; then
+for quant in ${STT_QUANTS:-q4k}; do
+    out="$DIR/model.${quant/q8_0/q8}.gguf"
+    [[ -s "$out" ]] && continue
     XN_MOSHI="$ROOT/target/xn-moshi"
     if [[ ! -d "$XN_MOSHI/.git" ]]; then
         git clone -q https://github.com/gradium-ai/xn-moshi "$XN_MOSHI"
@@ -40,9 +46,9 @@ if [[ ! -s "$DIR/model.q8.gguf" ]]; then
     fi
     # It takes the folder: model.safetensors and mimi.safetensors.
     cargo run --release --manifest-path "$XN_MOSHI/Cargo.toml" --example quantize -- \
-        asr "$DIR" "$DIR/model.q8.gguf.part" --quant q8_0
-    mv "$DIR/model.q8.gguf.part" "$DIR/model.q8.gguf"
-fi
+        asr "$DIR" "$out.part" --quant "$quant" | tail -1
+    mv "$out.part" "$out"
+done
 mkdir -p "$ROOT/models"
 ln -sfn "$DIR" "$ROOT/models/stt-1b-en_fr"
-echo "==> $DIR: $(du -sh "$DIR/model.q8.gguf" | cut -f1) model.q8.gguf"
+echo "==> $DIR:"; du -sh "$DIR"/model.*.gguf

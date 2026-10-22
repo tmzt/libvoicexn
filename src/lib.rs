@@ -277,7 +277,19 @@ fn android_main(app: libmorph::AndroidApp) {
     // is too many on phones that mix fast and slow cores (plan section 4).
     // SAFETY: no other thread has started yet.
     // VOICEXN_THREADS at build time overrides it, to compare thread counts.
-    let threads = option_env!("VOICEXN_THREADS").unwrap_or("2");
+    // STT needs 4 on the S23 to keep up with 80 ms frames.
+    let default = if cfg!(feature = "stt-moshi-xn") {
+        "4"
+    } else {
+        "2"
+    };
+    let threads = option_env!("VOICEXN_THREADS").unwrap_or(default);
     unsafe { std::env::set_var("RAYON_NUM_THREADS", threads) };
+    // VOICEXN_STT_QUANT at build time picks the STT model's quantization.
+    #[cfg(feature = "stt-moshi-xn")]
+    if let Some(quant) = option_env!("VOICEXN_STT_QUANT") {
+        // SAFETY: as above.
+        unsafe { std::env::set_var("VOICEXN_STT_QUANT", quant) };
+    }
     libmorph::run_android::<App>(app);
 }

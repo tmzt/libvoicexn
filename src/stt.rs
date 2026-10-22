@@ -145,11 +145,40 @@ mod tests {
     }
 }
 
-/// Kyutai STT on the CPU, q8: the LM from `model.q8.gguf`, Mimi from
+/// One ASR step, whatever the LM's quantization.
+trait AsrStep: Send {
+    fn step(
+        &mut self,
+        pcm: &xn::streaming::StreamTensor<f32, xn::CpuDevice>,
+        mask: &xn::streaming::StreamMask,
+    ) -> xn::Result<Vec<xn_moshi::asr::StepResult>>;
+}
+
+impl<Q: xn::BackendQ<T = f32, B = xn::CpuDevice>> AsrStep for xn_moshi::asr::AsrState<Q>
+where
+    xn_moshi::asr::AsrState<Q>: Send,
+{
+    fn step(
+        &mut self,
+        pcm: &xn::streaming::StreamTensor<f32, xn::CpuDevice>,
+        mask: &xn::streaming::StreamMask,
+    ) -> xn::Result<Vec<xn_moshi::asr::StepResult>> {
+        self.step_pcm(pcm, mask, |_, _, _| {})
+    }
+}
+
+/// The LM's quantization, from `VOICEXN_STT_QUANT`: `q4k` (the default,
+/// `model.q4k.gguf`), `q4_0`, or `q8_0` (`model.q8.gguf`). q4k is the one
+/// that keeps up on the S23 (CHANGES.md, 2026-10-22).
+pub fn quant() -> String {
+    std::env::var("VOICEXN_STT_QUANT").unwrap_or_else(|_| "q4k".into())
+}
+
+/// Kyutai STT on the CPU: the LM from a quantized GGUF, Mimi from
 /// `mimi.safetensors` (the GGUF leaves out Mimi's decoder, which
 /// `Mimi::load` builds too).
 pub struct Stt {
-    state: xn_moshi::asr::AsrState<xn::quantized::Q80F32>,
+    state: Box<dyn AsrStep>,
     mask: xn::streaming::StreamMask,
     decoder: crate::spm::Decoder,
     /// Every word's tokens so far, with the separator before each, so that
@@ -199,15 +228,34 @@ impl Stt {
             VB::load(&[dir.join("mimi.safetensors")], xn::CPU).map_err(|e| fail("mimi", &e))?;
         let mimi: Mimi<f32, xn::CpuDevice> =
             Mimi::load(&mimi_vb.root(), mimi_config).map_err(|e| fail("mimi", &e))?;
-        let gguf = std::fs::File::open(dir.join("model.q8.gguf"))
-            .map_err(|e| fail("model.q8.gguf", &e))?;
-        let lm_vb = VB::load_gguf(std::io::BufReader::new(gguf), xn::CPU)
-            .map_err(|e| fail("model.q8.gguf", &e))?;
-        let lm: LmModel<xn::quantized::Q80F32> =
-            LmModel::load(&lm_vb.root().pp("lm"), &config.to_lm_config())
-                .map_err(|e| fail("lm", &e))?;
-        let asr = xn_moshi::asr::Asr::new(asr_delay_in_tokens, 0.0, mimi, lm);
-        let state = asr.init_state(1).map_err(|e| fail("state", &e))?;
+        let quant = quant();
+        let file = format!("model.{}.gguf", if quant == "q8_0" { "q8" } else { &quant });
+        let gguf = std::fs::File::open(dir.join(&file)).map_err(|e| fail(&file, &e))?;
+        let lm_vb =
+            VB::load_gguf(std::io::BufReader::new(gguf), xn::CPU).map_err(|e| fail(&file, &e))?;
+        let lm_vb = lm_vb.root().pp("lm");
+        let lm_config = config.to_lm_config();
+        fn state<Q: xn::BackendQ<T = f32, B = xn::CpuDevice>>(
+            lm_vb: &xn::nn::Path<xn::CpuDevice>,
+            lm_config: &xn_moshi::lm::Config,
+            delay: usize,
+            mimi: Mimi<f32, xn::CpuDevice>,
+        ) -> xn::Result<Box<dyn AsrStep>>
+        where
+            xn_moshi::asr::AsrState<Q>: Send,
+        {
+            let lm: LmModel<Q> = LmModel::load(lm_vb, lm_config)?;
+            let asr = xn_moshi::asr::Asr::new(delay, 0.0, mimi, lm);
+            Ok(Box::new(asr.init_state(1)?))
+        }
+        let state = match quant.as_str() {
+            "q8_0" => state::<xn::quantized::Q80F32>(&lm_vb, &lm_config, asr_delay_in_tokens, mimi),
+            "q4_0" => state::<xn::quantized::Q40F32>(&lm_vb, &lm_config, asr_delay_in_tokens, mimi),
+            "q4k" => state::<xn::quantized::Q4kF32>(&lm_vb, &lm_config, asr_delay_in_tokens, mimi),
+            other => return Err(format!("unknown VOICEXN_STT_QUANT {other:?}")),
+        }
+        .map_err(|e| fail("lm", &e))?;
+        log::info!("stt: LM {file}");
         Ok(Self {
             state,
             mask: xn::streaming::StreamMask::all_active(1),
@@ -225,7 +273,7 @@ impl Stt {
         let pcm = xn::streaming::StreamTensor::from_tensor(audio);
         let results = self
             .state
-            .step_pcm(&pcm, &self.mask, |_, _, _| {})
+            .step(&pcm, &self.mask)
             .map_err(|e| e.to_string())?;
         let mut step = Step::default();
         for result in results {
@@ -285,7 +333,8 @@ pub fn transcribe_file(model: &std::path::Path, wav: &std::path::Path) -> Result
     let mut sorted = steps.clone();
     sorted.sort_by(f64::total_cmp);
     log::info!(
-        "stt: load {load_ms} ms, {} steps, step mean {mean:.1} ms, p95 {:.1} ms, max {:.1} ms (budget 80 ms), {} threads",
+        "stt: {} load {load_ms} ms, {} steps, step mean {mean:.1} ms, p95 {:.1} ms, max {:.1} ms (budget 80 ms), {} threads",
+        quant(),
         steps.len(),
         sorted[sorted.len() * 95 / 100],
         sorted[sorted.len() - 1],
