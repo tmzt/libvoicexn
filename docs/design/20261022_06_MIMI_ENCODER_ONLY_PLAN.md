@@ -1,7 +1,7 @@
 ---
 title: Mimi's encoder from the STT GGUF, without mimi.safetensors
 date: 2026-10-22
-status: In implementation
+status: Implemented
 covers:
   - Loading Kyutai STT's Mimi encoder from `model.q4k.gguf`, which already
     holds it, so `mimi.safetensors` (385 MB) is no longer read, pushed or
@@ -196,3 +196,20 @@ the open questions of section 5 and the pull request in step 1:
 `status` is now `In implementation`, and the document is immutable from
 here on (AGENTS.md Rule 1.5). Step 1 is in the fork, not in this
 repository, so the status change is its own commit here.
+
+## Amendment — 2026-10-22 14:53 EDT: implemented
+
+Every step is done and its **Done when:** holds, with the departures
+recorded in `CHANGES.md` ("Mimi encoder-only, steps 1 to 4"). `status` is
+now `Implemented`.
+
+- Step 0: the fork `tmzt/xn-moshi`, cloned at `b5366b7`.
+- Step 1: `5d994ac` in the fork, branch `mimi-encoder-only`, pushed; no
+  pull request, by the owner's decision.
+- Step 2: `b6480aa`.
+- Step 3: `6390507`, `f2a3023`.
+- Step 4: `32b8032` (tag `v0.2.0`).
+- Record: `d4f66ae`.
+
+Measured: the same transcripts on the desktop, 385 MB less to push
+(1.02 GB), and 152 MB less memory on the S23 after load.
