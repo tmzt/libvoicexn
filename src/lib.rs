@@ -3,6 +3,8 @@
 
 pub mod playback;
 #[cfg(feature = "stt-moshi-xn")]
+pub mod spm;
+#[cfg(feature = "stt-moshi-xn")]
 pub mod stt;
 pub mod tts;
 
@@ -122,6 +124,24 @@ impl MorphApp for App {
         });
         if playback.is_none() {
             log::warn!("playback: no audio output");
+        }
+        // Debug hook (plan 20261022_02, step 2): a `transcribe.wav` in the
+        // data directory is transcribed once at launch, and the result and
+        // step times are logged.
+        #[cfg(feature = "stt-moshi-xn")]
+        if let Some(dir) = ctx.data_dir() {
+            let wav = dir.join("transcribe.wav");
+            if wav.exists() {
+                let model = dir.join("stt-1b-en_fr");
+                std::thread::spawn(move || {
+                    // After Phonon has loaded, so the two do not share the CPU.
+                    std::thread::sleep(Duration::from_secs(10));
+                    match stt::transcribe_file(&model, &wav) {
+                        Ok(text) => log::info!("stt: transcript {text:?}"),
+                        Err(e) => log::error!("stt: {e}"),
+                    }
+                });
+            }
         }
         let model = model_dir(ctx);
         log::info!("tts: loading {}", model.display());
@@ -256,6 +276,8 @@ fn android_main(app: libmorph::AndroidApp) {
     // Before the tts thread starts: rayon's default of one thread per core
     // is too many on phones that mix fast and slow cores (plan section 4).
     // SAFETY: no other thread has started yet.
-    unsafe { std::env::set_var("RAYON_NUM_THREADS", "2") };
+    // VOICEXN_THREADS at build time overrides it, to compare thread counts.
+    let threads = option_env!("VOICEXN_THREADS").unwrap_or("2");
+    unsafe { std::env::set_var("RAYON_NUM_THREADS", threads) };
     libmorph::run_android::<App>(app);
 }

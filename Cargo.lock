@@ -3049,6 +3049,8 @@ dependencies = [
  "log",
  "ptts",
  "rtrb",
+ "serde_json",
+ "xn",
  "xn-moshi",
 ]
 

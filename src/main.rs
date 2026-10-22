@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! cargo run --release -- --say "Hello from voicexn." [--model <dir>] [--voice <name>]
+//! cargo run --release --features stt-moshi-xn -- --transcribe <wav> [--model <dir>]
 //! ```
 
 use std::path::PathBuf;
@@ -17,6 +18,10 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--say") {
         return say(&args[1..]);
+    }
+    #[cfg(feature = "stt-moshi-xn")]
+    if args.first().map(String::as_str) == Some("--transcribe") {
+        return transcribe(&args[1..]);
     }
     match libmorph::run::<voicexn::App>() {
         Ok(()) => ExitCode::SUCCESS,
@@ -69,4 +74,32 @@ fn say(args: &[String]) -> ExitCode {
         }
     }
     ExitCode::FAILURE
+}
+
+/// Transcribes a WAV file (plan 20261022_02, step 2).
+#[cfg(feature = "stt-moshi-xn")]
+fn transcribe(args: &[String]) -> ExitCode {
+    let mut wav = None;
+    let mut model = PathBuf::from("models/stt-1b-en_fr");
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--model" => model = args.next().map_or(model, PathBuf::from),
+            _ => wav = Some(PathBuf::from(arg)),
+        }
+    }
+    let Some(wav) = wav else {
+        log::error!("usage: voicexn --transcribe <wav> [--model <dir>]");
+        return ExitCode::FAILURE;
+    };
+    match voicexn::stt::transcribe_file(&model, &wav) {
+        Ok(text) => {
+            println!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            log::error!("stt: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }

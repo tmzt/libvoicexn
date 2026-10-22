@@ -24,6 +24,8 @@ log = "0.4"
 rtrb = "0.3"
 # Kyutai STT through xn (plan 20261022_02), behind `stt-moshi-xn`.
 xn-moshi = { version = "0.2.6", optional = true }
+xn = { version = "0.2.12", optional = true }
+serde_json = { version = "1", optional = true }
 # Phonon on xn, CPU only; `hf` reads the checkpoint's tokenizer.json.
 # 0.4.1 (tag v0.4.1) is not on crates.io yet.
 ptts = { git = "https://github.com/gradium-ai/xn-ptts", rev = "49b9033e44ab0fbb935973eca3213757644d1bbb", features = ["hf"] }
@@ -31,7 +33,7 @@ ptts = { git = "https://github.com/gradium-ai/xn-ptts", rev = "49b9033e44ab0fbb9
 [features]
 default = []
 # Live speech-to-text with Kyutai's stt-1b-en_fr on xn-moshi.
-stt-moshi-xn = ["dep:xn-moshi"]
+stt-moshi-xn = ["dep:xn-moshi", "dep:xn", "dep:serde_json"]
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 env_logger = "0.11"
