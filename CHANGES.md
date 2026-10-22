@@ -323,3 +323,12 @@ Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 6, in
 - The minute of speech was a 55.7 s Phonon recording on the speaker, with
   the build that listens throughout. Phonon's replies mute the microphone
   (plan 02, decision 6), so not all of it was heard; dropped stayed 0.
+
+## 2026-10-22 14:19 EDT — Mimi encoder-only plan
+
+New planned work: load Kyutai STT's Mimi encoder from the GGUF that already
+holds it, through a `Mimi::load_encoder` added to a fork of xn-moshi, so
+`mimi.safetensors` (385 MB) is no longer read or pushed, and about 160 MB of
+unused decoder weights leave memory. No crate on crates.io does this on xn.
+Plan: `docs/design/20261022_06_MIMI_ENCODER_ONLY_PLAN.md` (Draft), steps 0
+to 4.
