@@ -1,0 +1,10 @@
+# The lib* folders in ~/src, from scripts/vocab-lib.sh.
+libbarstool
+libcontrols
+libdevice
+libgenai
+libmobile
+libmorph
+libmsdf
+libshader
+libtypedmd

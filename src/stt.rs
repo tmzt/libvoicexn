@@ -174,6 +174,10 @@ trait AsrStep: Send {
         pcm: &xn::streaming::StreamTensor<f32, xn::CpuDevice>,
         mask: &xn::streaming::StreamMask,
     ) -> xn::Result<Vec<xn_moshi::asr::StepResult>>;
+
+    /// Attaches a token booster (plan 20261022_04, decision 5).
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    fn set_booster(&mut self, booster: Box<dyn xn_moshi::asr::TokenBooster>) -> xn::Result<()>;
 }
 
 impl<Q: xn::BackendQ<T = f32, B = xn::CpuDevice>> AsrStep for xn_moshi::asr::AsrState<Q>
@@ -186,6 +190,11 @@ where
         mask: &xn::streaming::StreamMask,
     ) -> xn::Result<Vec<xn_moshi::asr::StepResult>> {
         self.step_pcm(pcm, mask, |_, _, _| {})
+    }
+
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    fn set_booster(&mut self, booster: Box<dyn xn_moshi::asr::TokenBooster>) -> xn::Result<()> {
+        self.reset_batch_idx(0, None, None, Some(booster), None)
     }
 }
 
@@ -278,6 +287,23 @@ impl Stt {
         }
         .map_err(|e| fail("lm", &e))?;
         log::info!("stt: LM {file}");
+        #[cfg(feature = "stt-moshi-xn-boost")]
+        let mut state = state;
+        #[cfg(feature = "stt-moshi-xn-boost")]
+        if let Some(path) = crate::boost::find_vocab(dir) {
+            let phrases = crate::boost::read_vocab(&path).map_err(|e| fail("vocab", &e))?;
+            let (start, cont) = crate::boost::VocabBooster::biases();
+            let booster = crate::boost::VocabBooster::from_phrases(&decoder, &phrases, start, cont);
+            log::info!(
+                "stt: boosting {} phrases ({} token sequences) from {}, start {start}, cont {cont}",
+                phrases.len(),
+                booster.len(),
+                path.display()
+            );
+            state
+                .set_booster(Box::new(booster))
+                .map_err(|e| fail("booster", &e))?;
+        }
         Ok(Self {
             state,
             mask: xn::streaming::StreamMask::all_active(1),

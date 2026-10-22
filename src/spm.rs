@@ -180,6 +180,11 @@ impl Decoder {
         self.pieces.len()
     }
 
+    /// Whether piece `id` starts a word: its text begins with `▁`.
+    pub fn starts_word(&self, id: u32) -> bool {
+        matches!(self.pieces.get(id as usize), Some(Piece::Text(t)) if t.starts_with(SPACE))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pieces.is_empty()
     }

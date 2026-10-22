@@ -38,6 +38,8 @@ default = []
 stt-moshi-xn = ["dep:xn-moshi", "dep:xn", "dep:serde_json"]
 # Tap to talk: earshot opens and closes the gate to the STT model.
 vad-earshot = ["stt-moshi-xn", "dep:earshot"]
+# Bias STT toward a phrase list, vocab.txt (plan 20261022_04).
+stt-moshi-xn-boost = ["stt-moshi-xn"]
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 env_logger = "0.11"

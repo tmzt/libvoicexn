@@ -4,6 +4,8 @@
 //! utterance and repeats it with Phonon
 //! (docs/design/20261022_02_STT_MOSHI_XN_PLAN.md).
 
+#[cfg(feature = "stt-moshi-xn-boost")]
+pub mod boost;
 pub mod playback;
 #[cfg(feature = "stt-moshi-xn")]
 pub mod spm;
