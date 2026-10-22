@@ -3941,8 +3941,7 @@ dependencies = [
 [[package]]
 name = "xn-moshi"
 version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5b009eb89ca9814f43ec1dc6b9fc1ec246b9e8c73a83daf9ed2ce3aaa39de36"
+source = "git+https://github.com/tmzt/xn-moshi?rev=5d994acf10615f65f910b7b4175d490947d2ff8f#5d994acf10615f65f910b7b4175d490947d2ff8f"
 dependencies = [
  "rand",
  "serde",

@@ -68,9 +68,8 @@ where
     }
 }
 
-/// Kyutai STT on the CPU: the LM from a quantized GGUF, Mimi from
-/// `mimi.safetensors` (the GGUF leaves out Mimi's decoder, which
-/// `Mimi::load` builds too).
+/// Kyutai STT on the CPU: the LM and Mimi's encoder, both from one
+/// quantized GGUF (docs/design/20261022_06_MIMI_ENCODER_ONLY_PLAN.md).
 pub(crate) struct Stt {
     state: Box<dyn AsrStep>,
     mask: xn::streaming::StreamMask,
@@ -120,15 +119,15 @@ impl Stt {
             .as_f64()
             .unwrap_or(0.5);
         let asr_delay_in_tokens = (delay_s * 12.5).round() as usize;
-        let mimi_vb =
-            VB::load(&[dir.join("mimi.safetensors")], xn::CPU).map_err(|e| fail("mimi", &e))?;
-        let mimi: Mimi<f32, xn::CpuDevice> =
-            Mimi::load(&mimi_vb.root(), mimi_config).map_err(|e| fail("mimi", &e))?;
         let file = settings.quant.file();
         let gguf = std::fs::File::open(dir.join(file)).map_err(|e| fail(file, &e))?;
-        let lm_vb =
+        let root =
             VB::load_gguf(std::io::BufReader::new(gguf), xn::CPU).map_err(|e| fail(file, &e))?;
-        let lm_vb = lm_vb.root().pp("lm");
+        let root = root.root();
+        // Speech-to-text only encodes; the GGUF holds no decoder.
+        let mimi: Mimi<f32, xn::CpuDevice> =
+            Mimi::load_encoder(&root.pp("mimi"), mimi_config).map_err(|e| fail("mimi", &e))?;
+        let lm_vb = root.pp("lm");
         let lm_config = config.to_lm_config();
         fn state<Q: xn::BackendQ<T = f32, B = xn::CpuDevice>>(
             lm_vb: &xn::nn::Path<xn::CpuDevice>,

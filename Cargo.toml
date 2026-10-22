@@ -16,7 +16,8 @@ log = "0.4"
 # The realtime-safe ring between the tts thread and the audio thread.
 rtrb = "0.3"
 # Kyutai STT through xn (plan 20261022_02), behind `stt-moshi-xn`.
-xn-moshi = { version = "0.2.6", optional = true }
+# Mimi::load_encoder (plan 20261022_06) is on the fork until upstream has it.
+xn-moshi = { git = "https://github.com/tmzt/xn-moshi", rev = "5d994acf10615f65f910b7b4175d490947d2ff8f", optional = true }
 xn = { version = "0.2.12", optional = true }
 serde_json = { version = "1", optional = true }
 # Voice activity detection in pure Rust (plan 20261022_03), behind `vad-earshot`.
