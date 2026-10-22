@@ -61,3 +61,13 @@ Plan `docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md`, step 3:
   sample of an utterance (42 µs) is not played.
 - `synth_ms` leaves out the time spent waiting for room in the ring, so the
   RTF of utterances longer than the ring's 2 s stays a measure of synthesis.
+
+## 2026-10-22 09:13 EDT — Speech-to-text on xn-moshi plan
+
+New planned work, on branch `feat-moshi-xn`: a `stt-moshi-xn` feature that
+transcribes the microphone live with Kyutai's `stt-1b-en_fr` (q8) through
+`xn-moshi` 0.2.6, on a `stt` thread fed by libmorph capture, half-duplex
+with the Phonon TTS, and a tap that speaks the transcript back. Step 2
+measures the phone's step time against the 80 ms frame before screen work.
+Plan: `docs/design/20261022_02_STT_MOSHI_XN_PLAN.md` (Draft), built in the
+four steps of section 4.
