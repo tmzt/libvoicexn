@@ -71,3 +71,24 @@ with the Phonon TTS, and a tap that speaks the transcript back. Step 2
 measures the phone's step time against the 80 ms frame before screen work.
 Plan: `docs/design/20261022_02_STT_MOSHI_XN_PLAN.md` (Draft), built in the
 four steps of section 4.
+
+## 2026-10-22 09:17 EDT — Models live in ~/src/common-models
+
+Owner's instruction: downloaded models go in `~/src/common-models`, and
+the project links to them. `scripts/fetch-model.sh` (plan 20261022_01,
+step 2) now writes `${COMMON_MODELS:-~/src/common-models}/phonon-31m-en`
+and links `models/phonon-31m-en` to it. It takes no directory argument any
+more. `scripts/fetch-stt.sh` (plan 20261022_02, step 2) does the same for
+`stt-1b-en_fr`. Section 3 of both plans names `models/<name>`, which is
+now a symlink. The models already downloaded were moved, not fetched again.
+
+## 2026-10-22 09:17 EDT — STT plan, step 1: small departures
+
+Plan `docs/design/20261022_02_STT_MOSHI_XN_PLAN.md`, step 1:
+- The capture API is `stt::capture(format, speaking, seconds) -> (Sink,
+  Capture)` with `CaptureStats` (peak, dropped), not section 3's
+  `capture_sink(.., ring)`. The sink owns its ring and hands back the
+  reading end.
+- `playback::Consumer::speaking()` is the shared flag of decision 6. It is
+  set after every fill that played something.
+- Until step 3, `App::update` empties the capture ring each frame.
