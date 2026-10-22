@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use voicexn::tts::{TtsEvent, TtsRequest, TtsWorker};
+use libvoicexn::tts::{TtsEvent, TtsRequest, TtsWorker};
 
 const MODEL_DIR: &str = "models/phonon-31m-en";
 
@@ -23,7 +23,7 @@ fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some("--transcribe") {
         return transcribe(&args[1..]);
     }
-    match libmorph::run::<voicexn::App>() {
+    match libmorph::run::<libvoicexn::App>() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             log::error!("{e}");
@@ -92,7 +92,7 @@ fn transcribe(args: &[String]) -> ExitCode {
         log::error!("usage: voicexn --transcribe <wav> [--model <dir>]");
         return ExitCode::FAILURE;
     };
-    match voicexn::stt::transcribe_file(&model, &wav) {
+    match libvoicexn::stt::transcribe_file(&model, &wav) {
         Ok(text) => {
             println!("{text}");
             ExitCode::SUCCESS

@@ -1330,6 +1330,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "libvoicexn"
+version = "0.1.0"
+dependencies = [
+ "android_logger",
+ "earshot",
+ "env_logger",
+ "libcontrols",
+ "libmorph",
+ "libmorph-build",
+ "libmsdf",
+ "log",
+ "ptts",
+ "rtrb",
+ "serde_json",
+ "xn",
+ "xn-moshi",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3041,25 +3060,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "voicexn"
-version = "0.1.0"
-dependencies = [
- "android_logger",
- "earshot",
- "env_logger",
- "libcontrols",
- "libmorph",
- "libmorph-build",
- "libmsdf",
- "log",
- "ptts",
- "rtrb",
- "serde_json",
- "xn",
- "xn-moshi",
-]
 
 [[package]]
 name = "walkdir"

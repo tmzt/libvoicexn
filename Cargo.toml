@@ -1,5 +1,5 @@
 [package]
-name = "voicexn"
+name = "libvoicexn"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -7,7 +7,7 @@ publish = false
 description = "A minimal realtime speech example: Phonon text-to-speech on xn, in a libmorph app"
 
 [lib]
-name = "voicexn"
+name = "libvoicexn"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]

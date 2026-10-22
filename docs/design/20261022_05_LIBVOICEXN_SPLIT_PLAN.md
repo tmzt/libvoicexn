@@ -1,7 +1,7 @@
 ---
 title: libvoicexn, a speech library with voicexn as its demo
 date: 2026-10-22
-status: Draft
+status: In implementation
 covers:
   - Renaming this repository to `~/src/libvoicexn`, keeping its history,
     plans and `CHANGES.md`
@@ -233,3 +233,12 @@ quantization is chosen per platform instead of once at build time.
 2. Should `examples/voicexn` keep the name, or become `voicexn-android`
    now that there are two? This plan keeps `voicexn`, so the package,
    app id and scripts do not change.
+
+## Amendment — 2026-10-22 13:25 EDT: implementation started
+
+Step 0 holds: `~/src/libvoicexn` is clean on `main` at `3bdfc11`, and
+`cargo build --features "vad-earshot stt-moshi-xn-boost"` passes there.
+At the owner's request ("continue rename plan"), step 1 starts with this
+commit, and `status` is now `In implementation`. The document is
+immutable from here on (AGENTS.md Rule 1.5). Open question 2 is settled as
+the plan says: the example keeps the name `voicexn`.
