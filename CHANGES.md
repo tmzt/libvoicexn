@@ -253,3 +253,21 @@ Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 2, in
   behind `stt-moshi-xn` too.
 - The library commit removes `stt::capture` and `playback::source`, so
   `examples/voicexn` does not build at `3b4f993`, only at `62816e1`.
+
+## 2026-10-22 13:40 EDT — libvoicexn split, step 3: departures
+
+Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 3, in
+`0a82a48`, `8c805d9` and `7fc023c`.
+- `SttConfig::vocab` and `boost` exist only with `stt-moshi-xn-boost`
+  (decision 5's "boost feature only"). `SttQuant` adds `parse`, `file`,
+  `for_platform` and the constants `ANDROID` and `DESKTOP`; `parse`
+  takes `q8` as well as `q8_0`. A bad `VOICEXN_STT_QUANT` or
+  `VOICEXN_BOOST` is logged and the default kept, where it used to fail
+  the load.
+- `TtsWorker::spawn(config, playback)`: the recording folder moved into
+  `TtsConfig::record`. `boost::find_vocab` and `VocabBooster::biases`
+  moved into `SttConfig::for_platform`; `stt::quant` is gone.
+- The desktop default is already `Q8_0`, as decision 5 says, before
+  step 4 measures it.
+- `android_main` still copies a build-time `VOICEXN_STT_QUANT` into the
+  environment, where `for_platform` reads it.
