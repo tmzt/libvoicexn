@@ -3,11 +3,13 @@
 # $COMMON_MODELS/stt-1b-en_fr (default ~/src/common-models), quantize it
 # there, and link models/stt-1b-en_fr to it:
 #   model.safetensors  mimi.safetensors   the checkpoint as published
-#   model.q4k.gguf     the LM (q4k linears) and Mimi's encoder, one file
+#   model.q4k.gguf     the LM (q4k linears) and Mimi's encoder, one file:
+#                      Android's default
+#   model.q8.gguf      the same with q8_0 linears: the desktop's default
 #   config.json  tokenizer.model
 #
 #   scripts/fetch-stt.sh
-#   STT_QUANTS="q8_0 q4_0 q4k" scripts/fetch-stt.sh   # others besides q4k
+#   STT_QUANTS="q4k q8_0 q4_0" scripts/fetch-stt.sh   # others besides these
 #
 # Each quantization is model.<quant>.gguf, except q8_0, which is
 # model.q8.gguf.
@@ -33,7 +35,7 @@ fetch "$REPO/tokenizer_en_fr_audio_8000.model" "$DIR/tokenizer.model"
 fetch "$REPO/mimi-pytorch-e351c8d8@125.safetensors" "$DIR/mimi.safetensors"
 fetch "$REPO/model.safetensors" "$DIR/model.safetensors"
 
-for quant in ${STT_QUANTS:-q4k}; do
+for quant in ${STT_QUANTS:-q4k q8_0}; do
     out="$DIR/model.${quant/q8_0/q8}.gguf"
     [[ -s "$out" ]] && continue
     XN_MOSHI="$ROOT/target/xn-moshi"
