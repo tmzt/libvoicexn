@@ -120,3 +120,28 @@ Departures in the step-2 code:
   `VOICEXN_THREADS` sets `RAYON_NUM_THREADS` (default 2) for the comparison.
 - `scripts/push-stt.sh` stages each file, skips files already there at full
   size, and retries, because wireless adb dropped the 1.4 GB push twice.
+
+## 2026-10-22 10:01 EDT — STT plan, step 2: q4k keeps up on the S23
+
+Plan `docs/design/20261022_02_STT_MOSHI_XN_PLAN.md`, step 2, after the stop
+recorded above. The owner chose 4-bit weights. This departs from decision 3
+(q8_0): the LM is quantized to q4k. Nothing else changes: the same xn-moshi
+quantizer, CPU, and Mimi from `mimi.safetensors`.
+- The q4_0 and q4k GGUFs are 974 MB, against 1.37 GB for q8. The quantizer
+  quantizes only the transformer linears; the embeddings and Mimi's encoder
+  keep their size.
+- M4, 4 threads: mean step q8_0 21.4 ms, q4_0 19.0 ms, q4k 17.8 ms. All
+  three give the same transcript, except that q4k writes "phone"
+  lowercase.
+- S23 Ultra, q4k: mean step 88.7 ms (2 threads) and 69.6 ms (3 threads).
+  Three runs at 4 threads gave 60.6, 72.3 and 66.4 ms, p95 66.8–83.2 ms,
+  with the transcript unchanged. q4_0 at 4 threads: 79.2 ms. q4k at 4
+  threads keeps the mean under the 80 ms frame, which is the gate. Single
+  frames over 80 ms are absorbed by the 4 s capture ring. The margin is
+  10–25%, measured with the phone warm from back-to-back runs.
+- q4k takes 13–23 s to load on the phone, against 7–10 s for q8.
+- Defaults: `VOICEXN_STT_QUANT=q4k`, and `RAYON_NUM_THREADS=4` when
+  `stt-moshi-xn` is on (2 without it). `fetch-stt.sh` and `push-stt.sh`
+  default to q4k. `STT_QUANTS` names others.
+- Open for step 3: `RAYON_NUM_THREADS` is one pool shared with Phonon. In
+  half-duplex both run at once while voicexn speaks.
