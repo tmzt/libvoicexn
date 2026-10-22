@@ -306,3 +306,20 @@ Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 5, in
   license. `LICENSE-APACHE` and `LICENSE-MIT` were added (libmorph's
   texts); every dependency is permissive, and the models are licensed
   separately (Phonon Apache-2.0, Kyutai STT CC-BY-4.0).
+
+## 2026-10-22 14:15 EDT — libvoicexn split, step 6: the tty example, and departures
+
+Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 6, in
+`0b3115b`.
+- `voicexn-tty` always turns on `libvoicexn/stt-moshi-xn`, and forwards
+  only `vad-earshot` and `stt-moshi-xn-boost`: without STT there is
+  nothing for it to do. `--vocab` without the boost is logged and ignored.
+- It opens the default devices in `f32`, the format CoreAudio gives; other
+  sample formats are not converted.
+- On an Apple M1, rayon's default of one thread per core (four of them slow)
+  gave an 83.5 ms step on battery; `RAYON_NUM_THREADS=4` gave 26–36 ms.
+  The library still sets no thread count (decision 4); choosing one in the
+  examples is left to the q4k tuning plan.
+- The minute of speech was a 55.7 s Phonon recording on the speaker, with
+  the build that listens throughout. Phonon's replies mute the microphone
+  (plan 02, decision 6), so not all of it was heard; dropped stayed 0.
