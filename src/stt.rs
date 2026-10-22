@@ -13,6 +13,10 @@ use crate::playback::Resampler;
 /// Mimi's input rate.
 pub const STT_RATE: u32 = 24_000;
 
+/// How long the microphone stays muted after voicexn stops speaking: the
+/// output's own buffer and the room's echo.
+pub const ECHO_HOLD_S: f32 = 0.3;
+
 /// What the sink has seen, for the log; read and reset by [`take`](Self::take).
 #[derive(Default)]
 pub struct CaptureStats {
@@ -37,7 +41,9 @@ pub struct Capture {
 }
 
 /// The sink for `Audio::add_sink`, and the ring it fills (`seconds` long).
-/// While `speaking` is set, the sink pushes zeros in place of what it hears.
+/// While `speaking` is set, and for [`ECHO_HOLD_S`] after, the sink pushes
+/// nothing: the model does not hear voicexn, and pauses instead of stepping
+/// through silence while Phonon has the CPU.
 pub fn capture(format: CaptureFormat, speaking: Arc<AtomicBool>, seconds: u32) -> (Sink, Capture) {
     let (mut ring, consumer) = rtrb::RingBuffer::new((STT_RATE * seconds) as usize);
     let stats = Arc::new(CaptureStats::default());
@@ -47,6 +53,9 @@ pub fn capture(format: CaptureFormat, speaking: Arc<AtomicBool>, seconds: u32) -
     // Room for blocks of up to a second; larger ones grow it once.
     let mut mono = Vec::with_capacity(format.sample_rate as usize);
     let mut out = Vec::with_capacity(STT_RATE as usize);
+    let hold = (ECHO_HOLD_S * format.sample_rate as f32) as usize;
+    // Input frames still to mute after speaking stopped.
+    let mut muted = 0usize;
     let sink = Box::new(move |captured: &Captured<'_>| {
         mono.clear();
         let mut peak = 0.0f32;
@@ -57,7 +66,13 @@ pub fn capture(format: CaptureFormat, speaking: Arc<AtomicBool>, seconds: u32) -
         }
         seen.peak.fetch_max(peak.to_bits(), Ordering::Relaxed);
         if speaking.load(Ordering::Relaxed) {
-            mono.fill(0.0);
+            muted = hold;
+            return;
+        }
+        if muted > 0 {
+            let skip = muted.min(mono.len());
+            muted -= skip;
+            mono.drain(..skip);
         }
         out.clear();
         resampler.process(&mono, &mut out);
@@ -99,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn stereo_48k_arrives_as_mono_24k_and_silence_while_speaking() {
+    fn stereo_48k_arrives_as_mono_24k_and_nothing_while_speaking() {
         let format = CaptureFormat {
             sample_rate: 48_000,
             channels: 2,
@@ -123,12 +138,19 @@ mod tests {
 
         speaking.store(true, Ordering::Relaxed);
         sink(&block(&stereo));
-        let n = capture.ring.slots();
-        let chunk = capture.ring.read_chunk(n).unwrap();
-        assert!(chunk.as_slices().0.iter().all(|&x| x == 0.0));
-        chunk.commit_all();
+        assert_eq!(capture.ring.slots(), 0);
         // The level is still measured: it is the microphone, not the ring.
         assert_eq!(capture.stats.take().0, 0.2);
+
+        // Then the echo hold: 0.3 s of 48 kHz is 14 400 frames, 30 blocks
+        // of 480 muted, and the 31st heard.
+        speaking.store(false, Ordering::Relaxed);
+        for _ in 0..30 {
+            sink(&block(&stereo));
+        }
+        assert_eq!(capture.ring.slots(), 0);
+        sink(&block(&stereo));
+        assert!(capture.ring.slots() > 200);
     }
 
     #[test]
@@ -388,4 +410,200 @@ pub fn read_wav(path: &std::path::Path) -> Result<Vec<f32>, String> {
     let mut out = Vec::new();
     Resampler::new(rate, STT_RATE).process(&mono, &mut out);
     Ok(out)
+}
+
+/// Splits the transcript into utterances: one ends once a word has been
+/// heard and then [`Segmenter::end_frames`] frames pass without another.
+pub struct Segmenter {
+    pub end_frames: u32,
+    text: String,
+    quiet: u32,
+}
+
+impl Segmenter {
+    /// About 1.2 s of no new words, after the model's own 0.5 s delay.
+    pub fn new() -> Self {
+        Self {
+            end_frames: 15,
+            text: String::new(),
+            quiet: 0,
+        }
+    }
+
+    /// The utterance so far.
+    pub fn partial(&self) -> &str {
+        self.text.trim()
+    }
+
+    /// Takes one step's new text; returns the utterance once it ends.
+    pub fn push(&mut self, new_text: &str) -> Option<String> {
+        if !new_text.is_empty() {
+            self.text.push_str(new_text);
+            self.quiet = 0;
+            return None;
+        }
+        if self.text.trim().is_empty() {
+            return None;
+        }
+        self.quiet += 1;
+        if self.quiet < self.end_frames {
+            return None;
+        }
+        self.quiet = 0;
+        Some(std::mem::take(&mut self.text).trim().to_string())
+    }
+}
+
+impl Default for Segmenter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug)]
+pub enum SttEvent {
+    Loaded {
+        load_ms: u32,
+    },
+    LoadFailed(String),
+    /// The utterance so far, after a step that added words.
+    Partial(String),
+    /// An utterance that has ended.
+    Utterance(String),
+    /// Every 25 frames (2 s of audio): the mean step time against the
+    /// 80 ms budget, and the samples the capture has dropped.
+    Speed {
+        step_ms: f32,
+        dropped: u64,
+    },
+}
+
+/// The `stt` thread: it loads the model, then steps it on each 80 ms frame
+/// the capture ring holds (plan 20261022_02, decision 4).
+pub struct SttWorker {
+    rx: std::sync::mpsc::Receiver<SttEvent>,
+}
+
+impl SttWorker {
+    pub fn spawn(model_dir: std::path::PathBuf, capture: Capture) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("stt".into())
+            .spawn(move || run(&model_dir, capture, &tx))
+            .expect("spawning the stt thread");
+        Self { rx }
+    }
+
+    pub fn poll(&self) -> impl Iterator<Item = SttEvent> + '_ {
+        self.rx.try_iter()
+    }
+}
+
+fn run(
+    model_dir: &std::path::Path,
+    mut capture: Capture,
+    events: &std::sync::mpsc::Sender<SttEvent>,
+) {
+    use std::time::{Duration, Instant};
+
+    let start = Instant::now();
+    let mut stt = match Stt::load(model_dir) {
+        Ok(stt) => stt,
+        Err(e) => {
+            let _ = events.send(SttEvent::LoadFailed(e));
+            return;
+        }
+    };
+    let _ = events.send(SttEvent::Loaded {
+        load_ms: start.elapsed().as_millis() as u32,
+    });
+    // What was said while the model loaded is not transcribed, and what the
+    // full ring dropped meanwhile is not counted.
+    let n = capture.ring.slots();
+    if let Ok(chunk) = capture.ring.read_chunk(n) {
+        chunk.commit_all();
+    }
+    let dropped_at_load = capture.stats.take().1;
+
+    let mut segmenter = Segmenter::new();
+    let mut frame = [0.0; FRAME];
+    let (mut steps, mut step_time) = (0u32, Duration::ZERO);
+    loop {
+        let Ok(chunk) = capture.ring.read_chunk(FRAME) else {
+            std::thread::sleep(Duration::from_millis(10));
+            continue;
+        };
+        let (a, b) = chunk.as_slices();
+        frame[..a.len()].copy_from_slice(a);
+        frame[a.len()..].copy_from_slice(b);
+        chunk.commit_all();
+
+        let t = Instant::now();
+        let step = match stt.step(&frame) {
+            Ok(step) => step,
+            Err(e) => {
+                log::error!("stt: {e}");
+                continue;
+            }
+        };
+        step_time += t.elapsed();
+        steps += 1;
+
+        let added = !step.text.is_empty();
+        let ended = segmenter.push(&step.text);
+        let sent = if let Some(text) = ended {
+            events.send(SttEvent::Utterance(text))
+        } else if added {
+            events.send(SttEvent::Partial(segmenter.partial().to_string()))
+        } else {
+            Ok(())
+        };
+        if sent.is_err() {
+            return; // the app has gone
+        }
+        if steps == 25 {
+            let _ = events.send(SttEvent::Speed {
+                step_ms: step_time.as_secs_f32() * 1000.0 / steps as f32,
+                dropped: capture.stats.take().1 - dropped_at_load,
+            });
+            (steps, step_time) = (0, Duration::ZERO);
+        }
+    }
+}
+
+#[cfg(test)]
+mod segmenter_tests {
+    use super::*;
+
+    #[test]
+    fn an_utterance_ends_after_quiet_frames() {
+        let mut s = Segmenter::new();
+        assert_eq!(s.push(""), None, "no words yet: nothing to end");
+        for _ in 0..40 {
+            assert_eq!(s.push(""), None);
+        }
+        assert_eq!(s.push(" Hello"), None);
+        assert_eq!(s.push(" there."), None);
+        assert_eq!(s.partial(), "Hello there.");
+        for _ in 0..14 {
+            assert_eq!(s.push(""), None);
+        }
+        assert_eq!(s.push("").as_deref(), Some("Hello there."));
+        assert_eq!(s.partial(), "");
+        assert_eq!(s.push(""), None);
+    }
+
+    #[test]
+    fn a_word_restarts_the_quiet_count() {
+        let mut s = Segmenter::new();
+        s.push(" one");
+        for _ in 0..10 {
+            s.push("");
+        }
+        s.push(" two");
+        for _ in 0..14 {
+            assert_eq!(s.push(""), None);
+        }
+        assert_eq!(s.push("").as_deref(), Some("one two"));
+    }
 }

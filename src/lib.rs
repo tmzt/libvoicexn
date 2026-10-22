@@ -1,5 +1,8 @@
 //! voicexn: Phonon text-to-speech on xn, in a libmorph app
-//! (docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md).
+//! (docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md), and with
+//! `stt-moshi-xn`, Kyutai speech-to-text on xn-moshi that hears an
+//! utterance and repeats it with Phonon
+//! (docs/design/20261022_02_STT_MOSHI_XN_PLAN.md).
 
 pub mod playback;
 #[cfg(feature = "stt-moshi-xn")]
@@ -7,11 +10,15 @@ pub mod spm;
 #[cfg(feature = "stt-moshi-xn")]
 pub mod stt;
 pub mod tts;
+pub mod ui;
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Duration;
+#[cfg(feature = "stt-moshi-xn")]
+use std::time::Instant;
 
-use libcontrols::{DrawContext, DrawControl, Label, Rect, TextAlign};
+use libcontrols::DrawContext;
 use libmorph::{AudioSetup, Frame, LimitsRequest, MorphApp, MorphContext, Touch, TouchPhase, wgpu};
 use libmsdf::GpuSdfRenderer;
 use libmsdf::drawlist::DrawList;
@@ -20,25 +27,34 @@ use libmsdf::font::{
 };
 
 use crate::tts::{TtsEvent, TtsRequest, TtsWorker};
+use crate::ui::{Layout, Line, SPOKEN, Screen, wrap};
+#[cfg(feature = "stt-moshi-xn")]
+use crate::ui::{MUTED, TEXT};
 
-const TEXT: [f32; 4] = [0.92, 0.93, 0.95, 1.0];
-const MUTED: [f32; 4] = [0.60, 0.62, 0.68, 1.0];
+/// The frame rate while STT listens: enough for text, and far less heat
+/// than the display's 120 Hz.
+#[cfg(feature = "stt-moshi-xn")]
+const LISTENING_FPS: u32 = 15;
 
-/// Spoken on a tap until the screen of step 4 has phrases.
+/// Spoken on a tap until something has been heard.
 const PHRASE: &str =
     "Phonon turns text into natural speech, right on your device, with no cloud round trip.";
 
-/// The checkpoint folder: `models/phonon-31m-en` on the desktop (or
-/// `--model <dir>`), `<data dir>/phonon-31m-en` on Android.
-fn model_dir(ctx: &MorphContext) -> PathBuf {
+/// Utterances kept on screen.
+const HISTORY: usize = 4;
+
+/// A checkpoint folder: `models/<name>` on the desktop, `<data dir>/<name>`
+/// on Android. `--model <dir>` overrides Phonon's on the desktop.
+fn model_dir(ctx: &MorphContext, name: &str) -> PathBuf {
     if let Some(dir) = ctx.data_dir() {
-        return dir.join("phonon-31m-en");
+        return dir.join(name);
     }
     let args = ctx.args();
-    args.iter()
-        .position(|a| a == "--model")
-        .and_then(|i| args.get(i + 1))
-        .map_or_else(|| PathBuf::from("models/phonon-31m-en"), PathBuf::from)
+    let flag = args.iter().position(|a| a == "--model");
+    match flag.and_then(|i| args.get(i + 1)) {
+        Some(dir) if name == "phonon-31m-en" => PathBuf::from(dir),
+        _ => PathBuf::from("models").join(name),
+    }
 }
 
 pub struct App {
@@ -46,16 +62,115 @@ pub struct App {
     shaper: TextShaper,
     sdf: GpuSdfRenderer,
     list: DrawList,
+    screen: Screen,
+    /// When the next frame may start, while the frame rate is capped.
+    #[cfg(feature = "stt-moshi-xn")]
+    next_frame: Instant,
     tts: TtsWorker,
     status: String,
+    /// What was heard and repeated, newest first.
+    history: VecDeque<String>,
+    #[cfg(feature = "stt-moshi-xn")]
+    stt: Option<stt::SttWorker>,
+    #[cfg(feature = "stt-moshi-xn")]
+    stt_status: String,
+    /// The utterance being heard.
+    #[cfg(feature = "stt-moshi-xn")]
+    partial: String,
     /// Set by the audio thread while voicexn is speaking.
     #[cfg(feature = "stt-moshi-xn")]
     speaking: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl App {
+    /// Gives the screen what it shows now; it changes only what differs.
+    fn lay_out(&mut self, ctx: &MorphContext) {
+        let (w, h) = ctx.surface_size();
+        let safe = ctx.safe_area();
+        let layout = Layout {
+            w: w as f32,
+            h: h as f32,
+            scale: ctx.scale_factor(),
+            top: safe.top,
+            bottom: safe.bottom,
+        };
+        #[cfg_attr(not(feature = "stt-moshi-xn"), allow(unused_mut))]
+        let mut status = vec![self.status.clone()];
+        let mut body = Vec::new();
+        let line = |text: String, size: f32, color, gap| Line {
+            text,
+            size,
+            color,
+            gap,
+        };
+        #[cfg(feature = "stt-moshi-xn")]
+        {
+            status.push(self.stt_status.clone());
+            let size = 22.0;
+            if self.partial.is_empty() {
+                body.push(line("\u{2026}".into(), size, MUTED, 24.0));
+            }
+            for (i, text) in wrap(&self.partial, layout.columns(size))
+                .into_iter()
+                .enumerate()
+            {
+                body.push(line(text, size, TEXT, if i == 0 { 24.0 } else { 0.0 }));
+            }
+        }
+        let size = 19.0;
+        for said in &self.history {
+            let lines = wrap(&format!("> {said}"), layout.columns(size));
+            for (i, text) in lines.into_iter().enumerate() {
+                body.push(line(text, size, SPOKEN, if i == 0 { 18.0 } else { 0.0 }));
+            }
+        }
+        self.screen.set(layout, status, body);
+    }
+
+    fn speak(&mut self, text: String) {
+        self.tts.send(TtsRequest::Speak {
+            text: text.clone(),
+            voice: None,
+        });
+        self.history.push_front(text);
+        self.history.truncate(HISTORY);
+    }
+
     #[cfg(feature = "stt-moshi-xn")]
-    capture: Option<stt::Capture>,
-    /// Time since the last capture log line.
-    #[cfg(feature = "stt-moshi-xn")]
-    capture_log: Duration,
+    fn poll_stt(&mut self) {
+        let Some(worker) = &self.stt else {
+            return;
+        };
+        let mut heard = Vec::new();
+        for event in worker.poll() {
+            match event {
+                stt::SttEvent::Loaded { load_ms } => {
+                    log::info!("stt: loaded in {load_ms} ms");
+                    self.stt_status = format!("listening \u{b7} STT load {load_ms} ms");
+                }
+                stt::SttEvent::LoadFailed(e) => {
+                    log::error!("stt: {e}");
+                    self.stt_status = format!("STT model missing: {e}");
+                }
+                stt::SttEvent::Partial(text) => self.partial = text,
+                stt::SttEvent::Utterance(text) => {
+                    log::info!("stt: heard {text:?}");
+                    self.partial.clear();
+                    heard.push(text);
+                }
+                stt::SttEvent::Speed { step_ms, dropped } => {
+                    log::info!("stt: step {step_ms:.1} ms, dropped {dropped}");
+                    self.stt_status = format!("listening \u{b7} step {step_ms:.0} ms of 80");
+                    if dropped > 0 {
+                        self.stt_status += &format!(" \u{b7} dropped {dropped}");
+                    }
+                }
+            }
+        }
+        for text in heard {
+            self.speak(text);
+        }
+    }
 }
 
 impl MorphApp for App {
@@ -125,39 +240,27 @@ impl MorphApp for App {
         if playback.is_none() {
             log::warn!("playback: no audio output");
         }
-        // Debug hook (plan 20261022_02, step 2): a `transcribe.wav` in the
-        // data directory is transcribed once at launch, and the result and
-        // step times are logged.
-        #[cfg(feature = "stt-moshi-xn")]
-        if let Some(dir) = ctx.data_dir() {
-            let wav = dir.join("transcribe.wav");
-            if wav.exists() {
-                let model = dir.join("stt-1b-en_fr");
-                std::thread::spawn(move || {
-                    // After Phonon has loaded, so the two do not share the CPU.
-                    std::thread::sleep(Duration::from_secs(10));
-                    match stt::transcribe_file(&model, &wav) {
-                        Ok(text) => log::info!("stt: transcript {text:?}"),
-                        Err(e) => log::error!("stt: {e}"),
-                    }
-                });
-            }
-        }
-        let model = model_dir(ctx);
+        let model = model_dir(ctx, "phonon-31m-en");
         log::info!("tts: loading {}", model.display());
         Self {
             atlas,
             shaper,
             sdf,
             list: DrawList::new(),
+            screen: Screen::new(),
+            #[cfg(feature = "stt-moshi-xn")]
+            next_frame: Instant::now(),
             tts: TtsWorker::spawn(model, playback, None),
             status: "loading\u{2026}".into(),
+            history: VecDeque::new(),
+            #[cfg(feature = "stt-moshi-xn")]
+            stt: None,
+            #[cfg(feature = "stt-moshi-xn")]
+            stt_status: "waiting for the microphone\u{2026}".into(),
+            #[cfg(feature = "stt-moshi-xn")]
+            partial: String::new(),
             #[cfg(feature = "stt-moshi-xn")]
             speaking,
-            #[cfg(feature = "stt-moshi-xn")]
-            capture: None,
-            #[cfg(feature = "stt-moshi-xn")]
-            capture_log: Duration::ZERO,
         }
     }
 
@@ -172,35 +275,35 @@ impl MorphApp for App {
             format.channels,
             ctx.audio().capture_mode()
         );
-        // Four seconds of 24 kHz mono; the stt thread reads it every frame.
+        // Four seconds of 24 kHz mono, read by the stt thread every frame.
         let (sink, capture) = stt::capture(format, self.speaking.clone(), 4);
         ctx.audio().add_sink(sink);
-        self.capture = Some(capture);
+        let model = model_dir(ctx, "stt-1b-en_fr");
+        log::info!("stt: loading {}", model.display());
+        self.stt = Some(stt::SttWorker::spawn(model, capture));
+        self.stt_status = "loading STT\u{2026}".into();
     }
 
-    fn update(&mut self, _ctx: &mut MorphContext, dt: Duration) {
+    fn update(&mut self, ctx: &mut MorphContext, _dt: Duration) {
+        // Hold the frame while STT listens: libmorph renders as fast as
+        // presentation allows, and the CPU and GPU heat the phone.
         #[cfg(feature = "stt-moshi-xn")]
-        if let Some(capture) = &mut self.capture {
-            // Nothing reads the capture yet (plan 20261022_02, step 1).
-            let n = capture.ring.slots();
-            if let Ok(chunk) = capture.ring.read_chunk(n) {
-                chunk.commit_all();
+        if self.stt.is_some() {
+            let now = Instant::now();
+            if now < self.next_frame {
+                std::thread::sleep(self.next_frame - now);
             }
-            self.capture_log += dt;
-            if self.capture_log >= Duration::from_secs(2) {
-                self.capture_log = Duration::ZERO;
-                let (peak, dropped) = capture.stats.take();
-                log::info!("capture: peak {peak:.3}, dropped {dropped}");
-            }
+            let interval = Duration::from_secs(1) / LISTENING_FPS;
+            self.next_frame = self.next_frame.max(now) + interval;
         }
-        #[cfg(not(feature = "stt-moshi-xn"))]
-        let _ = dt;
+        #[cfg(feature = "stt-moshi-xn")]
+        self.poll_stt();
         for event in self.tts.poll() {
             log::info!("tts: {event:?}");
             match event {
                 TtsEvent::Loaded { voices, load_ms } => {
                     self.status = format!(
-                        "ready \u{b7} load {load_ms} ms \u{b7} {} voices",
+                        "TTS ready \u{b7} load {load_ms} ms \u{b7} {} voices",
                         voices.len()
                     );
                 }
@@ -217,41 +320,29 @@ impl MorphApp for App {
                 TtsEvent::Started { .. } => {}
             }
         }
+        self.lay_out(ctx);
     }
 
+    /// A tap repeats the last utterance, or says the demo sentence.
     fn on_touch(&mut self, _ctx: &mut MorphContext, touch: Touch) {
         if touch.phase == TouchPhase::Ended {
-            self.tts.send(TtsRequest::Speak {
-                text: PHRASE.into(),
-                voice: None,
-            });
+            let text = self
+                .history
+                .front()
+                .cloned()
+                .unwrap_or_else(|| PHRASE.into());
+            self.history.pop_front();
+            self.speak(text);
         }
     }
 
     fn render(&mut self, ctx: &mut MorphContext, frame: &Frame<'_>) {
-        let (w, h) = frame.size;
-        let s = ctx.scale_factor();
         let draw = DrawContext {
             px_range: BUNDLED_ATLAS_PX_RANGE,
             ..DrawContext::new(Some(&self.atlas), Some(&self.shaper))
         };
-        self.list.clear();
-        Label::new(
-            "voicexn",
-            Rect::new(0.0, h as f32 * 0.4, w as f32, 48.0 * s),
-        )
-        .with_font_size(40.0 * s)
-        .with_color(TEXT)
-        .with_align(TextAlign::Center)
-        .draw(&mut self.list, &draw);
-        Label::new(
-            self.status.as_str(),
-            Rect::new(0.0, h as f32 * 0.4 + 64.0 * s, w as f32, 32.0 * s),
-        )
-        .with_font_size(18.0 * s)
-        .with_color(MUTED)
-        .with_align(TextAlign::Center)
-        .draw(&mut self.list, &draw);
+        self.screen.draw(&mut self.list, &draw);
+        let (w, h) = frame.size;
         self.sdf.render_draw_list(
             ctx.device(),
             ctx.queue(),
@@ -275,7 +366,6 @@ fn android_main(app: libmorph::AndroidApp) {
     );
     // Before the tts thread starts: rayon's default of one thread per core
     // is too many on phones that mix fast and slow cores (plan section 4).
-    // SAFETY: no other thread has started yet.
     // VOICEXN_THREADS at build time overrides it, to compare thread counts.
     // STT needs 4 on the S23 to keep up with 80 ms frames.
     let default = if cfg!(feature = "stt-moshi-xn") {
@@ -284,6 +374,7 @@ fn android_main(app: libmorph::AndroidApp) {
         "2"
     };
     let threads = option_env!("VOICEXN_THREADS").unwrap_or(default);
+    // SAFETY: no other thread has started yet.
     unsafe { std::env::set_var("RAYON_NUM_THREADS", threads) };
     // VOICEXN_STT_QUANT at build time picks the STT model's quantization.
     #[cfg(feature = "stt-moshi-xn")]
