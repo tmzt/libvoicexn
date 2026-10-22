@@ -53,3 +53,18 @@ use (decision 6); everything else is crate-private.
 - With `morph`: `morph::source(Consumer) -> libmorph::Source`, and with
   `stt-moshi-xn`, `morph::sink(Mic) -> libmorph::Sink` and
   `morph::capture(CaptureFormat, speaking, seconds) -> (Sink, Capture)`.
+
+## 0.2.0 — 2026-10-22 (tag v0.2.0)
+
+Mimi's encoder from the STT GGUF
+(`docs/design/20261022_06_MIMI_ENCODER_ONLY_PLAN.md`).
+
+- **Breaking:** xn-moshi 0.2.6 from crates.io → the fork
+  `github.com/tmzt/xn-moshi` at `5d994ac` (0.2.6 with
+  `Mimi::load_encoder`). `boost::VocabBooster` implements
+  `xn_moshi::asr::TokenBooster` from that source, so an app that also
+  depends on crates.io's xn-moshi sees a different trait.
+- Changed: `stt::SttWorker::spawn` and `stt::transcribe_file` no longer read
+  `mimi.safetensors`; the model folder needs only `model.<quant>.gguf`,
+  `config.json` and `tokenizer.model`. A `mimi.safetensors` there is
+  ignored.
