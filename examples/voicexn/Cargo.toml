@@ -15,7 +15,7 @@ name = "voicexn"
 path = "src/main.rs"
 
 [dependencies]
-libvoicexn = { path = "../.." }
+libvoicexn = { path = "../..", features = ["morph"] }
 libmorph = { git = "https://github.com/tmzt/libmorph", rev = "bb0174d14f77e4b54a250e78293b3a9cb4a6617a" }
 # The revision libcontrols pins, so the graph holds one libmsdf.
 libmsdf = { git = "https://github.com/tmzt/libmsdf", rev = "b48d0664a4222ffd1fe505962d13459fbadb5034", features = ["font-apache-roboto-regular"] }

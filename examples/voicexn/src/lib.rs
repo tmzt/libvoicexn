@@ -24,12 +24,12 @@ use libmsdf::font::{
 use crate::ui::{Layout, Line, SPOKEN, Screen, wrap};
 #[cfg(feature = "stt-moshi-xn")]
 use crate::ui::{MUTED, TEXT};
-use libvoicexn::playback;
 #[cfg(feature = "stt-moshi-xn")]
 use libvoicexn::stt;
 use libvoicexn::tts::{TtsEvent, TtsRequest, TtsWorker};
 #[cfg(feature = "vad-earshot")]
 use libvoicexn::vad;
+use libvoicexn::{morph, playback};
 
 /// The frame rate while STT listens: enough for text, and far less heat
 /// than the display's 120 Hz.
@@ -248,7 +248,7 @@ impl MorphApp for App {
             {
                 speaking = consumer.speaking();
             }
-            ctx.audio().add_source(playback::source(consumer));
+            ctx.audio().add_source(morph::source(consumer));
             log::info!(
                 "playback: {} Hz, {} channels",
                 format.sample_rate,
@@ -303,7 +303,7 @@ impl MorphApp for App {
             ctx.audio().capture_mode()
         );
         // Four seconds of 24 kHz mono, read by the stt thread every frame.
-        let (sink, capture) = stt::capture(format, self.speaking.clone(), 4);
+        let (sink, capture) = morph::capture(format, self.speaking.clone(), 4);
         ctx.audio().add_sink(sink);
         let model = model_dir(ctx, "stt-1b-en_fr");
         log::info!("stt: loading {}", model.display());
