@@ -29,6 +29,7 @@ pub struct Producer {
 pub struct Consumer {
     ring: rtrb::Consumer<f32>,
     flush: Arc<AtomicBool>,
+    speaking: Arc<AtomicBool>,
 }
 
 /// A ring holding `capacity_frames` frames of `channels` interleaved samples
@@ -44,7 +45,12 @@ pub fn ring(capacity_frames: usize, channels: u16, out_rate: u32) -> (Producer, 
         resampler: Resampler::new(TTS_RATE, out_rate),
         scratch: Vec::new(),
     };
-    (producer, Consumer { ring: rx, flush })
+    let consumer = Consumer {
+        ring: rx,
+        flush,
+        speaking: Arc::new(AtomicBool::new(false)),
+    };
+    (producer, consumer)
 }
 
 impl Producer {
@@ -100,6 +106,11 @@ impl Producer {
 }
 
 impl Consumer {
+    /// True while the last fill played something: voicexn is speaking.
+    pub fn speaking(&self) -> Arc<AtomicBool> {
+        self.speaking.clone()
+    }
+
     /// Fills `out` from the ring, leaving zeros where it runs dry.
     pub fn fill(&mut self, out: &mut [f32]) {
         if self.flush.load(Ordering::Acquire) {
@@ -116,6 +127,7 @@ impl Consumer {
             out[a.len()..a.len() + b.len()].copy_from_slice(b);
             chunk.commit_all();
         }
+        self.speaking.store(n > 0, Ordering::Relaxed);
     }
 }
 

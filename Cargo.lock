@@ -743,6 +743,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d926b4d407d372f141f93bb444696142c29d32962ccbd3531117cf3aa0bfa9"
 
 [[package]]
+name = "earshot"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "afea66474c4036a7e5fa4b072a3b0a09cd0b01f00134da3115d76b7cc5899f03"
+
+[[package]]
 name = "ebur128"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3041,6 +3047,7 @@ name = "voicexn"
 version = "0.1.0"
 dependencies = [
  "android_logger",
+ "earshot",
  "env_logger",
  "libcontrols",
  "libmorph",
@@ -3049,6 +3056,9 @@ dependencies = [
  "log",
  "ptts",
  "rtrb",
+ "serde_json",
+ "xn",
+ "xn-moshi",
 ]
 
 [[package]]
@@ -3907,6 +3917,19 @@ dependencies = [
  "raw-cpuid",
  "seq-macro",
  "xn-gemm-common",
+]
+
+[[package]]
+name = "xn-moshi"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5b009eb89ca9814f43ec1dc6b9fc1ec246b9e8c73a83daf9ed2ce3aaa39de36"
+dependencies = [
+ "rand",
+ "serde",
+ "serde_json",
+ "tracing",
+ "xn",
 ]
 
 [[package]]
