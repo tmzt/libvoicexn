@@ -43,3 +43,21 @@ Plan `docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md`, step 2:
   event, for `--say`. `TtsEvent::Failed` reports a failed utterance.
 - `scripts/fetch-model.sh` uses `curl` against both pinned revisions rather
   than `hf download`, so it needs no Python tooling.
+
+## 2026-10-22 09:07 EDT — Phonon TTS plan, step 3: small departures
+
+Plan `docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md`, step 3:
+- The step was proven on the Galaxy S23 Ultra, not only the desktop. The
+  headless `--morph-script` run opens no audio output, and the owner tests
+  on the phone. That brought forward two parts of step 5:
+  `scripts/push-model.sh`, and `RAYON_NUM_THREADS=2` in `android_main`.
+  The thread-count comparison is still step 5's.
+- The ring is `rtrb` 0.3. On `Stop`, the producer raises a flush flag that
+  the audio thread clears after dropping the queued audio, instead of
+  section 3's generation counter. The producer waits at most 100 ms for it,
+  since a paused output never answers.
+- The resampler holds each chunk's last sample for the next chunk, so a
+  chunk that ends exactly on an output position leaves no seam. The final
+  sample of an utterance (42 µs) is not played.
+- `synth_ms` leaves out the time spent waiting for room in the ring, so the
+  RTF of utterances longer than the ring's 2 s stays a measure of synthesis.
