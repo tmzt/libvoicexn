@@ -1,10 +1,13 @@
-# AGENTS.md — voicexn: a minimal realtime STT/TTS example on Android
+# AGENTS.md — libvoicexn: realtime STT/TTS on xn, with voicexn as its demo
 
-voicexn is an application, not a library: a `libmorph` app (with `libmsdf`,
-and `libcontrols` where it earns its place) that listens through the
-microphone, transcribes speech and speaks text back, with the models run
-on-device through xn rather than ONNX Runtime. The rules below are carried
-over from libcontrols' `AGENTS.md`.
+libvoicexn is a library, with voicexn as its demo: the root crate listens
+through the microphone, transcribes speech and speaks text back, with the
+models run on-device through xn rather than ONNX Runtime, and with no UI
+or libmorph in its core. `examples/voicexn` is the `libmorph` app (with
+`libmsdf`, and `libcontrols` where it earns its place) that shows it on
+Android and the desktop. The library's version follows Rule 5; the
+examples are `publish = false` and are not versioned. The rules below are
+carried over from libcontrols' `AGENTS.md`.
 
 ## CRITICAL RULE 0: THE CHANGES.MD PROTOCOL
 
