@@ -285,3 +285,24 @@ decision 5, in `bd274ad` and `0750a89`.
   `q4k q8`. `--quant` and `VOICEXN_STT_QUANT` still take q8_0 and q4_0.
 - Boost tuning moves to another app of the owner's; `stt-moshi-xn-boost`
   here stays the example that shows it works.
+
+## 2026-10-22 13:59 EDT — libvoicexn split, step 5: 0.1.0, and departures
+
+Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 5, in
+`2db4042`, `1e4a0c1`, `66b8ed2`, `0d2d1da` and `3250b2b` (tag `v0.1.0`).
+- `Cargo.toml` was already at 0.1.0, so no commit changes the version;
+  the tag is on the `VERSIONS.md` commit, as the step says.
+- The `VERSIONS.md` heading names the tag but not the commit
+  (`## 0.1.0 — 2026-10-22 (tag v0.1.0)`), as libmorph, libmsdf and
+  libcontrols do: a commit cannot name its own hash, and the tag pins it.
+- Decision 6: `Stt`, `Step`, `FRAME`, `Segmenter`, `read_wav`, the VAD
+  tuning constants, `boost::START`, `CONT` and `read_vocab` became
+  `pub(crate)`. `STT_RATE`, `TTS_RATE` and `ECHO_HOLD_S` stay public,
+  because the documentation of `Mic` and the ring is written in those terms.
+- At the owner's request, the README is rewritten, not only its
+  introduction: what the library does as STT/TTS, the example's rendering
+  framework (libmorph, libmsdf, libcontrols) in its own section, the model
+  downloads and the xn-moshi quantize step, vocabulary boosting, and the
+  license. `LICENSE-APACHE` and `LICENSE-MIT` were added (libmorph's
+  texts); every dependency is permissive, and the models are licensed
+  separately (Phonon Apache-2.0, Kyutai STT CC-BY-4.0).
