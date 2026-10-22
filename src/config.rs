@@ -21,8 +21,9 @@ pub enum SttQuant {
 impl SttQuant {
     /// Android's: q4k keeps the step inside the 80 ms frame on the S23.
     pub const ANDROID: Self = Self::Q4k;
-    /// The desktop's (plan 20261022_05, step 4).
-    pub const DESKTOP: Self = Self::Q8_0;
+    /// The desktop's: q4k too, so the desktop runs what the phone runs
+    /// (plan 20261022_05, step 4; CHANGES.md).
+    pub const DESKTOP: Self = Self::Q4k;
 
     /// `q4k`, `q4_0` or `q8_0` (also `q8`), as `VOICEXN_STT_QUANT` and
     /// `--quant` take it.
@@ -153,12 +154,7 @@ mod tests {
     fn the_platform_default_without_overrides() {
         let c = SttConfig::with_env("/nowhere/stt".into(), env(&[]));
         assert_eq!(c.model_dir, PathBuf::from("/nowhere/stt"));
-        let want = if cfg!(target_os = "android") {
-            SttQuant::Q4k
-        } else {
-            SttQuant::Q8_0
-        };
-        assert_eq!(c.quant, want);
+        assert_eq!(c.quant, SttQuant::Q4k);
         #[cfg(feature = "stt-moshi-xn-boost")]
         assert_eq!(c.boost, (crate::boost::START, crate::boost::CONT));
     }
