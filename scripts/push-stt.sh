@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Copy the STT model (what the app loads: model.q4k.gguf, mimi.safetensors,
-# config.json, tokenizer.model; about 1.4 GB) into the app's data directory,
-# <data dir>/stt-1b-en_fr. Needs the debuggable APK installed, for run-as.
+# Copy the STT model (what the app loads: model.q4k.gguf, which holds the LM
+# and Mimi's encoder, config.json and tokenizer.model; about 1.02 GB) into
+# the app's data directory, <data dir>/stt-1b-en_fr. Needs the debuggable
+# APK installed, for run-as. A mimi.safetensors left there by an older push
+# is deleted: nothing reads it since plan 20261022_06.
 #
 #   scripts/push-stt.sh [<model dir>]
 #   STT_QUANTS="q8_0 q4_0" scripts/push-stt.sh    # other quantizations
@@ -20,7 +22,8 @@ GGUFS=()
 for quant in ${STT_QUANTS:-q4k}; do
     GGUFS+=("model.${quant/q8_0/q8}.gguf")
 done
-for f in "${GGUFS[@]}" mimi.safetensors config.json tokenizer.model; do
+FILES=("${GGUFS[@]}" config.json tokenizer.model)
+for f in "${FILES[@]}"; do
     size=$(stat -f %z "$SRC/$f" 2>/dev/null || stat -c %s "$SRC/$f")
     for attempt in 1 2 3; do
         [[ "$(adb shell stat -c %s "$TMP/$f" 2>/dev/null | tr -d '\r')" == "$size" ]] && break
@@ -30,5 +33,8 @@ for f in "${GGUFS[@]}" mimi.safetensors config.json tokenizer.model; do
     [[ "$(adb shell stat -c %s "$TMP/$f" | tr -d '\r')" == "$size" ]] || { echo "error: $f did not arrive" >&2; exit 1; }
 done
 # The staged files are kept, so another quantization only adds its GGUF.
-adb shell run-as "$APP_ID" sh -c "'mkdir -p files/stt-1b-en_fr && cp $TMP/* files/stt-1b-en_fr/'"
+adb shell rm -f "$TMP/mimi.safetensors"
+COPY=""
+for f in "${FILES[@]}"; do COPY+=" $TMP/$f"; done
+adb shell run-as "$APP_ID" sh -c "'mkdir -p files/stt-1b-en_fr && rm -f files/stt-1b-en_fr/mimi.safetensors && cp$COPY files/stt-1b-en_fr/'"
 echo "==> $APP_ID files/stt-1b-en_fr: $(adb shell run-as "$APP_ID" du -sh files/stt-1b-en_fr | cut -f1)"
