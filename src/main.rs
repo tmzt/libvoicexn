@@ -44,7 +44,7 @@ fn say(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let worker = TtsWorker::spawn(model, Some(PathBuf::from("out/tts")));
+    let worker = TtsWorker::spawn(model, None, Some(PathBuf::from("out/tts")));
     worker.send(TtsRequest::Speak { text, voice });
     while let Some(event) = worker.wait() {
         match event {
