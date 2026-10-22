@@ -1,0 +1,24 @@
+[package]
+name = "voicexn-tty"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "libvoicexn in a terminal: it hears a sentence, prints it and says it back with Phonon"
+
+[[bin]]
+name = "voicexn-tty"
+path = "src/main.rs"
+
+[dependencies]
+libvoicexn = { path = "../..", features = ["stt-moshi-xn"] }
+# The default input and output devices; the version libmorph's libmobile uses.
+cpal = "0.18.2"
+env_logger = "0.11"
+log = "0.4"
+
+# The library's features, forwarded.
+[features]
+default = []
+vad-earshot = ["libvoicexn/vad-earshot"]
+stt-moshi-xn-boost = ["libvoicexn/stt-moshi-xn-boost"]

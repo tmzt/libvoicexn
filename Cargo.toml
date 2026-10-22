@@ -37,7 +37,7 @@ stt-moshi-xn-boost = ["stt-moshi-xn"]
 morph = ["dep:libmorph"]
 
 [workspace]
-members = [".", "examples/voicexn"]
+members = [".", "examples/voicexn", "examples/voicexn-tty"]
 
 [profile.dev.package."*"]
 opt-level = 2
