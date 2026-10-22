@@ -1333,13 +1333,8 @@ dependencies = [
 name = "libvoicexn"
 version = "0.1.0"
 dependencies = [
- "android_logger",
  "earshot",
- "env_logger",
- "libcontrols",
  "libmorph",
- "libmorph-build",
- "libmsdf",
  "log",
  "ptts",
  "rtrb",
