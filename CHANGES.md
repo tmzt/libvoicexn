@@ -145,3 +145,30 @@ quantizer, CPU, and Mimi from `mimi.safetensors`.
   default to q4k. `STT_QUANTS` names others.
 - Open for step 3: `RAYON_NUM_THREADS` is one pool shared with Phonon. In
   half-duplex both run at once while voicexn speaks.
+
+## 2026-10-22 10:15 EDT — STT plan, steps 3 and 4: live, and repeated by Phonon
+
+Plan `docs/design/20261022_02_STT_MOSHI_XN_PLAN.md`, steps 3 and 4. The
+owner asked for "transcribe then repeat with phonon, display resulting
+text". That answers open question 2: an utterance is spoken back
+automatically when it ends, and a tap repeats the last one. Departures:
+- An utterance ends when 15 frames (1.2 s) pass with no new word after at
+  least one (`stt::Segmenter`).
+- Decision 6 changes: while voicexn speaks, and for 0.3 s after
+  (`ECHO_HOLD_S`), the capture sink pushes *nothing* rather than zeros. The
+  model pauses instead of stepping through silence while Phonon has the
+  CPU. Its clock does not need to run on.
+- Dropped samples are counted from the end of the model load: the 4 s ring
+  overflows while the 16–24 s load runs, and that is not a live drop.
+- The screen is a persistent libcontrols `Router` (`ui::Screen`): one
+  `Label` node per line, edited only when the text, colour or layout
+  changes. The draw list is rebuilt only then; other frames draw the list
+  already built.
+- At the owner's request, the frame rate is capped at 15 fps while STT
+  listens, by waiting in `update`. libmorph renders as fast as presentation
+  allows (120 Hz on the S23). It is plain wgpu, so the app paces itself.
+- The step-2 `transcribe.wav` debug hook is gone from the app.
+  `--transcribe` stays on the desktop.
+- Thermal: after about an hour of back-to-back runs the S23 reached thermal
+  status 3 (SEVERE, AP 68 °C, skin 45 °C), and the live step rose to
+  81–141 ms. Cooled to status 1 with the 15 fps cap, it steps at 60–66 ms.
