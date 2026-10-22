@@ -76,6 +76,12 @@ pub struct App {
     stt: Option<stt::SttWorker>,
     #[cfg(feature = "stt-moshi-xn")]
     stt_status: String,
+    /// What STT is doing, for the status line: "listening", or with
+    /// `vad-earshot`, the gate's state.
+    #[cfg(feature = "stt-moshi-xn")]
+    stt_doing: &'static str,
+    #[cfg(feature = "vad-earshot")]
+    gate: vad::GateState,
     /// The utterance being heard.
     #[cfg(feature = "stt-moshi-xn")]
     partial: String,
@@ -148,7 +154,7 @@ impl App {
             match event {
                 stt::SttEvent::Loaded { load_ms } => {
                     log::info!("stt: loaded in {load_ms} ms");
-                    self.stt_status = format!("listening \u{b7} STT load {load_ms} ms");
+                    self.stt_status = format!("{} \u{b7} STT load {load_ms} ms", self.stt_doing);
                 }
                 stt::SttEvent::LoadFailed(e) => {
                     log::error!("stt: {e}");
@@ -162,10 +168,23 @@ impl App {
                 }
                 stt::SttEvent::Speed { step_ms, dropped } => {
                     log::info!("stt: step {step_ms:.1} ms, dropped {dropped}");
-                    self.stt_status = format!("listening \u{b7} step {step_ms:.0} ms of 80");
+                    self.stt_status =
+                        format!("{} \u{b7} step {step_ms:.0} ms of 80", self.stt_doing);
                     if dropped > 0 {
                         self.stt_status += &format!(" \u{b7} dropped {dropped}");
                     }
+                }
+                #[cfg(feature = "vad-earshot")]
+                stt::SttEvent::Gate(state) => {
+                    log::info!("stt: gate {state:?}");
+                    self.gate = state;
+                    self.stt_doing = match state {
+                        vad::GateState::Idle => "tap to talk",
+                        vad::GateState::Armed => "listening\u{2026}",
+                        vad::GateState::Open => "hearing",
+                        vad::GateState::Closing => "finishing",
+                    };
+                    self.stt_status = self.stt_doing.into();
                 }
             }
         }
@@ -260,6 +279,14 @@ impl MorphApp for App {
             #[cfg(feature = "stt-moshi-xn")]
             stt_status: "waiting for the microphone\u{2026}".into(),
             #[cfg(feature = "stt-moshi-xn")]
+            stt_doing: if cfg!(feature = "vad-earshot") {
+                "tap to talk"
+            } else {
+                "listening"
+            },
+            #[cfg(feature = "vad-earshot")]
+            gate: vad::GateState::Idle,
+            #[cfg(feature = "stt-moshi-xn")]
             partial: String::new(),
             #[cfg(feature = "stt-moshi-xn")]
             speaking,
@@ -325,8 +352,27 @@ impl MorphApp for App {
         self.lay_out(ctx);
     }
 
-    /// A tap repeats the last utterance, or says the demo sentence.
+    /// A tap repeats the last utterance, or says the demo sentence; with
+    /// `vad-earshot`, once STT has loaded, it is tap to talk.
     fn on_touch(&mut self, _ctx: &mut MorphContext, touch: Touch) {
+        // Tap to talk (plan 20261022_03, decision 4): a tap arms, a tap while
+        // listening closes, and a tap while voicexn speaks stops it and arms.
+        #[cfg(feature = "vad-earshot")]
+        if touch.phase == TouchPhase::Ended
+            && let Some(stt) = &self.stt
+        {
+            use std::sync::atomic::Ordering;
+            use vad::GateState;
+            if self.speaking.load(Ordering::Relaxed) {
+                self.tts.send(TtsRequest::Stop);
+            }
+            match self.gate {
+                GateState::Idle => stt.send(stt::SttRequest::Arm),
+                GateState::Armed | GateState::Open => stt.send(stt::SttRequest::Close),
+                GateState::Closing => {}
+            }
+            return;
+        }
         if touch.phase == TouchPhase::Ended {
             let text = self
                 .history

@@ -430,6 +430,14 @@ impl Segmenter {
         }
     }
 
+    /// Ends the utterance now, if it has any words.
+    pub fn flush(&mut self) -> Option<String> {
+        self.quiet = 0;
+        let text = std::mem::take(&mut self.text);
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_string())
+    }
+
     /// The utterance so far.
     pub fn partial(&self) -> &str {
         self.text.trim()
@@ -476,98 +484,236 @@ pub enum SttEvent {
         step_ms: f32,
         dropped: u64,
     },
+    /// The tap-to-talk gate changed state (plan 20261022_03).
+    #[cfg(feature = "vad-earshot")]
+    Gate(crate::vad::GateState),
+}
+
+/// What the app asks of the `stt` thread (plan 20261022_03, decision 5).
+#[cfg(feature = "vad-earshot")]
+#[derive(Clone, Copy, Debug)]
+pub enum SttRequest {
+    Arm,
+    Close,
 }
 
 /// The `stt` thread: it loads the model, then steps it on each 80 ms frame
-/// the capture ring holds (plan 20261022_02, decision 4).
+/// the capture ring holds (plan 20261022_02, decision 4), or with
+/// `vad-earshot`, on what the gate lets through.
 pub struct SttWorker {
     rx: std::sync::mpsc::Receiver<SttEvent>,
+    #[cfg(feature = "vad-earshot")]
+    tx: std::sync::mpsc::Sender<SttRequest>,
 }
 
 impl SttWorker {
     pub fn spawn(model_dir: std::path::PathBuf, capture: Capture) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (events, rx) = std::sync::mpsc::channel();
+        #[cfg(feature = "vad-earshot")]
+        let (tx, requests) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("stt".into())
-            .spawn(move || run(&model_dir, capture, &tx))
+            .spawn(move || {
+                let Some(mut listener) = Listener::load(&model_dir, capture, events) else {
+                    return;
+                };
+                #[cfg(feature = "vad-earshot")]
+                listener.run_gated(&requests);
+                #[cfg(not(feature = "vad-earshot"))]
+                listener.run();
+            })
             .expect("spawning the stt thread");
-        Self { rx }
+        Self {
+            rx,
+            #[cfg(feature = "vad-earshot")]
+            tx,
+        }
     }
 
     pub fn poll(&self) -> impl Iterator<Item = SttEvent> + '_ {
         self.rx.try_iter()
     }
+
+    #[cfg(feature = "vad-earshot")]
+    pub fn send(&self, req: SttRequest) {
+        let _ = self.tx.send(req);
+    }
 }
 
-fn run(
-    model_dir: &std::path::Path,
-    mut capture: Capture,
-    events: &std::sync::mpsc::Sender<SttEvent>,
-) {
-    use std::time::{Duration, Instant};
+/// The `stt` thread's state once the model is loaded.
+struct Listener {
+    stt: Stt,
+    capture: Capture,
+    events: std::sync::mpsc::Sender<SttEvent>,
+    segmenter: Segmenter,
+    /// Audio waiting to make up an 80 ms frame.
+    pending: Vec<f32>,
+    steps: u32,
+    step_time: std::time::Duration,
+    dropped_at_load: u64,
+}
 
-    let start = Instant::now();
-    let mut stt = match Stt::load(model_dir) {
-        Ok(stt) => stt,
-        Err(e) => {
-            let _ = events.send(SttEvent::LoadFailed(e));
-            return;
-        }
-    };
-    let _ = events.send(SttEvent::Loaded {
-        load_ms: start.elapsed().as_millis() as u32,
-    });
-    // What was said while the model loaded is not transcribed, and what the
-    // full ring dropped meanwhile is not counted.
-    let n = capture.ring.slots();
-    if let Ok(chunk) = capture.ring.read_chunk(n) {
-        chunk.commit_all();
-    }
-    let dropped_at_load = capture.stats.take().1;
+/// The app has gone: the thread ends.
+struct Gone;
 
-    let mut segmenter = Segmenter::new();
-    let mut frame = [0.0; FRAME];
-    let (mut steps, mut step_time) = (0u32, Duration::ZERO);
-    loop {
-        let Ok(chunk) = capture.ring.read_chunk(FRAME) else {
-            std::thread::sleep(Duration::from_millis(10));
-            continue;
-        };
-        let (a, b) = chunk.as_slices();
-        frame[..a.len()].copy_from_slice(a);
-        frame[a.len()..].copy_from_slice(b);
-        chunk.commit_all();
-
-        let t = Instant::now();
-        let step = match stt.step(&frame) {
-            Ok(step) => step,
+impl Listener {
+    fn load(
+        model_dir: &std::path::Path,
+        mut capture: Capture,
+        events: std::sync::mpsc::Sender<SttEvent>,
+    ) -> Option<Self> {
+        let start = std::time::Instant::now();
+        let stt = match Stt::load(model_dir) {
+            Ok(stt) => stt,
             Err(e) => {
-                log::error!("stt: {e}");
-                continue;
+                let _ = events.send(SttEvent::LoadFailed(e));
+                return None;
             }
         };
-        step_time += t.elapsed();
-        steps += 1;
+        let _ = events.send(SttEvent::Loaded {
+            load_ms: start.elapsed().as_millis() as u32,
+        });
+        // What was said while the model loaded is not transcribed, and what
+        // the full ring dropped meanwhile is not counted.
+        let n = capture.ring.slots();
+        if let Ok(chunk) = capture.ring.read_chunk(n) {
+            chunk.commit_all();
+        }
+        let dropped_at_load = capture.stats.take().1;
+        Some(Self {
+            stt,
+            capture,
+            events,
+            segmenter: Segmenter::new(),
+            pending: Vec::with_capacity(2 * FRAME),
+            steps: 0,
+            step_time: std::time::Duration::ZERO,
+            dropped_at_load,
+        })
+    }
 
-        let added = !step.text.is_empty();
-        let ended = segmenter.push(&step.text);
-        let sent = if let Some(text) = ended {
-            events.send(SttEvent::Utterance(text))
-        } else if added {
-            events.send(SttEvent::Partial(segmenter.partial().to_string()))
-        } else {
-            Ok(())
+    fn send(&self, event: SttEvent) -> Result<(), Gone> {
+        self.events.send(event).map_err(|_| Gone)
+    }
+
+    /// Reads up to `n` samples from the capture ring into `out`, or waits a
+    /// little and returns `false` if fewer than `n` are there.
+    fn read(&mut self, n: usize, out: &mut Vec<f32>) -> bool {
+        let Ok(chunk) = self.capture.ring.read_chunk(n) else {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            return false;
         };
-        if sent.is_err() {
-            return; // the app has gone
+        let (a, b) = chunk.as_slices();
+        out.clear();
+        out.extend_from_slice(a);
+        out.extend_from_slice(b);
+        chunk.commit_all();
+        true
+    }
+
+    /// Feeds audio to STT, stepping each full 80 ms frame. Returns the
+    /// utterance if one ended.
+    fn feed(&mut self, audio: &[f32]) -> Result<Option<String>, Gone> {
+        use std::time::Instant;
+
+        self.pending.extend_from_slice(audio);
+        let mut ended = None;
+        while self.pending.len() >= FRAME {
+            let mut frame = [0.0; FRAME];
+            frame.copy_from_slice(&self.pending[..FRAME]);
+            self.pending.drain(..FRAME);
+            let t = Instant::now();
+            let step = match self.stt.step(&frame) {
+                Ok(step) => step,
+                Err(e) => {
+                    log::error!("stt: {e}");
+                    continue;
+                }
+            };
+            self.step_time += t.elapsed();
+            self.steps += 1;
+            let added = !step.text.is_empty();
+            if let Some(text) = self.segmenter.push(&step.text) {
+                self.send(SttEvent::Utterance(text.clone()))?;
+                ended = Some(text);
+            } else if added {
+                self.send(SttEvent::Partial(self.segmenter.partial().to_string()))?;
+            }
+            if self.steps == 25 {
+                let dropped = self.capture.stats.take().1 - self.dropped_at_load;
+                self.send(SttEvent::Speed {
+                    step_ms: self.step_time.as_secs_f32() * 1000.0 / self.steps as f32,
+                    dropped,
+                })?;
+                (self.steps, self.step_time) = (0, std::time::Duration::ZERO);
+            }
         }
-        if steps == 25 {
-            let _ = events.send(SttEvent::Speed {
-                step_ms: step_time.as_secs_f32() * 1000.0 / steps as f32,
-                dropped: capture.stats.take().1 - dropped_at_load,
-            });
-            (steps, step_time) = (0, Duration::ZERO);
+        Ok(ended)
+    }
+
+    /// Always listening: every frame goes to STT.
+    #[cfg(not(feature = "vad-earshot"))]
+    fn run(&mut self) {
+        let mut frame = Vec::with_capacity(FRAME);
+        loop {
+            if self.read(FRAME, &mut frame) && self.feed(&frame).is_err() {
+                return;
+            }
         }
+    }
+
+    /// Tap to talk (plan 20261022_03): earshot scores 16 ms frames while the
+    /// gate listens, and STT hears only what the gate lets through.
+    #[cfg(feature = "vad-earshot")]
+    fn run_gated(&mut self, requests: &std::sync::mpsc::Receiver<SttRequest>) {
+        use crate::vad::{Gate, GateState, SUB};
+
+        let mut gate = Gate::new();
+        let mut detector = earshot::Detector::default();
+        let mut to_16k = Resampler::new(STT_RATE, 16_000);
+        let (mut sub, mut feed, mut at_16k) = (Vec::new(), Vec::new(), Vec::new());
+        let mut score = 0.0;
+        let result: Result<(), Gone> = (|| loop {
+            for req in requests.try_iter() {
+                let changed = match req {
+                    SttRequest::Arm => {
+                        detector.reset();
+                        to_16k.reset();
+                        at_16k.clear();
+                        score = 0.0;
+                        gate.arm()
+                    }
+                    SttRequest::Close => gate.close(),
+                };
+                if let Some(state) = changed {
+                    self.send(SttEvent::Gate(state))?;
+                }
+            }
+            if !self.read(SUB, &mut sub) || !gate.listening() {
+                continue; // idle: the frame is dropped unheard
+            }
+            to_16k.process(&sub, &mut at_16k);
+            while at_16k.len() >= 256 {
+                score = detector.predict_f32(&at_16k[..256]);
+                at_16k.drain(..256);
+            }
+            feed.clear();
+            let mut changed = gate.push(score, &sub, &mut feed);
+            if self.feed(&feed)?.is_some() {
+                changed = gate.finish().or(changed);
+            }
+            if changed == Some(GateState::Idle) {
+                // Closed without an utterance: what was heard still counts.
+                if let Some(text) = self.segmenter.flush() {
+                    self.send(SttEvent::Utterance(text))?;
+                }
+                self.pending.clear();
+            }
+            if let Some(state) = changed {
+                self.send(SttEvent::Gate(state))?;
+            }
+        })();
+        let _ = result;
     }
 }
 
