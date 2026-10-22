@@ -123,7 +123,12 @@ cargo run --release --manifest-path target/xn-moshi/Cargo.toml --example quantiz
     asr ~/src/common-models/stt-1b-en_fr model.q4k.gguf --quant q4k
 ```
 
-The output holds the quantized LM and Mimi's encoder in one file:
+The output holds the quantized LM and Mimi's encoder (f32) in one file,
+and that file is all the library loads: speech-to-text never decodes, so
+Mimi is built with xn-moshi's `Mimi::load_encoder` and `mimi.safetensors`
+(385 MB, mostly the decoder) stays in the store as `quantize`'s input.
+`load_encoder` is on a fork, [tmzt/xn-moshi](https://github.com/tmzt/xn-moshi)
+(branch `mimi-encoder-only`), which libvoicexn pins by revision.
 
 | Quantization | File | Size | Used |
 |---|---|---|---|
@@ -182,7 +187,7 @@ Android SDK with an NDK, Gradle 9 and a JDK 17 or 21):
 ```sh
 scripts/android.sh --install -- --features "vad-earshot stt-moshi-xn-boost"
 scripts/push-model.sh         # Phonon into the app's data directory
-scripts/push-stt.sh           # model.q4k.gguf and the rest, about 1.4 GB
+scripts/push-stt.sh           # model.q4k.gguf, config.json, tokenizer.model: 1.02 GB
 scripts/push-vocab.sh         # vocab.txt, for the boost
 ```
 
