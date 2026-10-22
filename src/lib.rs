@@ -1,6 +1,8 @@
 //! voicexn: Phonon text-to-speech on xn, in a libmorph app
 //! (docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md).
 
+pub mod tts;
+
 use libcontrols::{DrawContext, DrawControl, Label, Rect, TextAlign};
 use libmorph::{Frame, LimitsRequest, MorphApp, MorphContext, wgpu};
 use libmsdf::GpuSdfRenderer;

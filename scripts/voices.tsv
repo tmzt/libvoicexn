@@ -1,0 +1,41 @@
+# Phonon 31m voices: the short list of Gradium's web demo (HF space gradium/phonon
+# at fcf37734, models.json, "Phonon 31M"), in its order. Files are in
+# gradium/phonon-voices at da6c9ec0d47be8df5c87c730a3aa97187f3229c3.
+# name	locale	file
+Zoey	en-us	voices/NbpkqMVS3CJeq2j8.safetensors
+Juniper	en-us	voices/NIWIOv5vTi5eRMj8.safetensors
+Everly	en-us	voices/vjFyp2BcCyTlUmYb.safetensors
+Harper	en-us	voices/4SZHfMpw-p46Ywgs.safetensors
+Hadley	en-us	voices/bXwrkHhURL1VFJdG.safetensors
+Delia	en-us	voices/nGzMHMPAWGaJFHOo.safetensors
+Easton	en-us	voices/LMDIYE0Oa377Qh6Z.safetensors
+Micah	en-us	voices/40QrMVgAxFiUnP9f.safetensors
+Trevor	en-us	voices/0zLApsZfVLLNaEGl.safetensors
+Russell	en-us	voices/_6Aslh2DxfmnRLmP.safetensors
+Preston	en-us	voices/qIxlZ7Ei8KvWlyQH.safetensors
+Miles	en-us	voices/d9XCyhjo4JhkHF1d.safetensors
+Maeve	en-gb	voices/6PWnV0Nq4wu7RVBT.safetensors
+Freya	en-gb	voices/GgfEkEJtxZR7gnpy.safetensors
+Pippa	en-gb	voices/uem82D50GRv2Dwma.safetensors
+Elodie-Rose	en-gb	voices/y9bQqIDnyxwqK01t.safetensors
+Imogen	en-gb	voices/gDT1nz7Ie36ZhL-C.safetensors
+Lottie	en-gb	voices/m9MxpY6IUGXtWp76.safetensors
+Bryony	en-gb	voices/gfP44RlHwr2kEwk7.safetensors
+Alfie	en-gb	voices/X6NceqF285Gr04gb.safetensors
+Hugh	en-gb	voices/YyKcxPG7iIgS3jsK.safetensors
+Edwin	en-gb	voices/zUCxzrOrugTSis03.safetensors
+Spencer	en-gb	voices/JOW0vchyswkQUMDS.safetensors
+Toby	en-gb	voices/dME3IWyZBvmh1n1q.safetensors
+Teddy	en-gb	voices/Zn7g6NxLqXlJb7Qi.safetensors
+Captain Silas Blackwater	characters	voices/xPDpsV3F592srkjA.safetensors
+Morwenna of the Deep	characters	voices/nOykTmcH9ydsGGIc.safetensors
+Old Mortlake	characters	voices/lX3LavMNdlIbgEHH.safetensors
+Azgorath	characters	voices/dGyGDKo2osj7h3s7.safetensors
+Fennick the Young Elf	characters	voices/cXoIXJ2llS8S0WOW.safetensors
+The Thing Under the Stairs	characters	voices/GXaSqMEmOg12OIYb.safetensors
+Vyrmathrax the Ancient	characters	voices/xO8xQo3BrB8FuI6J.safetensors
+Grub the Ogre	characters	voices/cYtsRSxV5q9IMehn.safetensors
+Master Aldric	characters	voices/gSgG5Tor0GPEnqzC.safetensors
+The Snow Queen	characters	voices/NIWoEurJHMJjyUTe.safetensors
+Sir Bramwell	characters	voices/y2eiKxtQo2B67deU.safetensors
+Fairy Godmother	characters	voices/QXNr0SvkukLB4wPq.safetensors
