@@ -242,3 +242,14 @@ Departures:
   example's WAV equals the old build's byte for byte, and the old build
   still differed from itself by 41 bytes in one of two runs. The
   `--transcribe` text of `out/boost/s1–s3.wav` is identical.
+
+## 2026-10-22 13:36 EDT — libvoicexn split, step 2: departures
+
+Plan `docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md`, step 2, in
+`3b4f993` and `62816e1`.
+- `capture` is behind `stt-moshi-xn`, as `stt` is: `Mic::new` returns
+  `stt::Capture`. `CaptureStats`, `Capture`, `STT_RATE` and
+  `ECHO_HOLD_S` stay in `stt`; `morph::sink` and `morph::capture` are
+  behind `stt-moshi-xn` too.
+- The library commit removes `stt::capture` and `playback::source`, so
+  `examples/voicexn` does not build at `3b4f993`, only at `62816e1`.
