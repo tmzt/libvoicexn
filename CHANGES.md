@@ -187,3 +187,32 @@ biases Kyutai STT toward a phrase list through xn-moshi's `TokenBooster`.
 It needs SentencePiece encoding in `src/spm.rs`. The first list is the
 `lib*` folders in `~/src`.
 Plan: `docs/design/20261022_04_STT_VOCAB_BOOST_PLAN.md` (Draft), three steps.
+
+## 2026-10-22 10:33 EDT — Vocabulary boost plan, step 2: the A/B, and departures
+
+Plan `docs/design/20261022_04_STT_VOCAB_BOOST_PLAN.md`, step 2. A/B on the
+M4: Phonon WAVs of three sentences that use all nine names, through
+`--transcribe` without and with the boost.
+- Plain: "lib controls", "Libem's DF", Libmorph, Libmobile, Libdevice,
+  Libshader, "Libdeni", "Libdpmdin", "Libestol".
+- Boost 1.5/4 (the plan's default): only "Libm's DF" changed.
+- Boost 1.5/8: Libgenai right, "Libms DF". Nothing else changed, and the
+  plan-02 demo sentence came out the same.
+- Boost 1.5/12: Libmsdf right as well, but sentence 3 stops after
+  "Libgenai,". Boost 2/16: libcontrols right too, but sentence 3 stops after
+  "Libshader,". Too much bias leaves the model inside a word that never
+  ends, so it is never flushed.
+- Phonon's renderings of the made-up names ("Libdpmdin") limit what this
+  A/B can show. Step 3, with a real voice, is the measure.
+
+Departures:
+- Decision 4: a pad (3) or silence pad (4) does not end a word. The model
+  writes pads between the pieces of one word, and resetting on them
+  dropped every match mid-word. A word starts at a token whose piece begins
+  with `▁` (`Decoder::starts_word`). Only end of paragraph (0) and end of
+  stream (2) clear the matches. First tokens get `start` at every step,
+  not only after a word end.
+- The default `cont` is 8.0, not 4.0 (above).
+- Decision 3: the encoder is `Decoder::encode` on the existing type, not a
+  new `spm::Model`.
+- `find_vocab` also takes `VOICEXN_VOCAB`.
