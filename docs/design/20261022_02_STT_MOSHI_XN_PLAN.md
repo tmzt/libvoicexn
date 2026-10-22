@@ -1,7 +1,7 @@
 ---
 title: Speech-to-text with Kyutai STT on xn-moshi
 date: 2026-10-22
-status: Draft
+status: In implementation
 covers:
   - A cargo feature `stt-moshi-xn` on the voicexn crate. When it is off,
     the build and the dependency graph are what plan 20261022_01 gives.
@@ -169,3 +169,11 @@ pub fn capture_sink(format: libmorph::CaptureFormat, speaking: Arc<AtomicBool>,
    attribution, not payment.
 2. Should step 4 keep the tap, or speak each sentence back automatically
    after a pause?
+
+## Amendment — 2026-10-22 09:17 EDT: implementation has started; the document is now immutable
+
+The owner asked for the feature to be added on `feat-moshi-xn`. Status
+moves from `Draft` to `In implementation` in the commit that implements
+step 1. From here this document changes only on the owner's explicit
+instruction (AGENTS.md Rule 1.5); departures are recorded in
+`CHANGES.md`.

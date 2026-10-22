@@ -3049,6 +3049,7 @@ dependencies = [
  "log",
  "ptts",
  "rtrb",
+ "xn-moshi",
 ]
 
 [[package]]
@@ -3907,6 +3908,19 @@ dependencies = [
  "raw-cpuid",
  "seq-macro",
  "xn-gemm-common",
+]
+
+[[package]]
+name = "xn-moshi"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5b009eb89ca9814f43ec1dc6b9fc1ec246b9e8c73a83daf9ed2ce3aaa39de36"
+dependencies = [
+ "rand",
+ "serde",
+ "serde_json",
+ "tracing",
+ "xn",
 ]
 
 [[package]]

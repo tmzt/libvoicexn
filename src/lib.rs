@@ -2,13 +2,15 @@
 //! (docs/design/20261022_01_PHONON_TTS_ON_ANDROID_PLAN.md).
 
 pub mod playback;
+#[cfg(feature = "stt-moshi-xn")]
+pub mod stt;
 pub mod tts;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use libcontrols::{DrawContext, DrawControl, Label, Rect, TextAlign};
-use libmorph::{Frame, LimitsRequest, MorphApp, MorphContext, Touch, TouchPhase, wgpu};
+use libmorph::{AudioSetup, Frame, LimitsRequest, MorphApp, MorphContext, Touch, TouchPhase, wgpu};
 use libmsdf::GpuSdfRenderer;
 use libmsdf::drawlist::DrawList;
 use libmsdf::font::{
@@ -44,6 +46,14 @@ pub struct App {
     list: DrawList,
     tts: TtsWorker,
     status: String,
+    /// Set by the audio thread while voicexn is speaking.
+    #[cfg(feature = "stt-moshi-xn")]
+    speaking: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(feature = "stt-moshi-xn")]
+    capture: Option<stt::Capture>,
+    /// Time since the last capture log line.
+    #[cfg(feature = "stt-moshi-xn")]
+    capture_log: Duration,
 }
 
 impl MorphApp for App {
@@ -58,6 +68,18 @@ impl MorphApp for App {
             preferred: required.clone(),
             required,
         }
+    }
+
+    /// With `stt-moshi-xn`, the microphone too, in Android's preset for
+    /// speech recognition (plan 20261022_02, decision 8).
+    fn audio_setup(setup: &mut AudioSetup) {
+        #[cfg(feature = "stt-moshi-xn")]
+        {
+            setup.capture = true;
+            setup.capture_mode = libmorph::CaptureMode::VoiceRecognition;
+        }
+        #[cfg(not(feature = "stt-moshi-xn"))]
+        let _ = setup;
     }
 
     fn init(ctx: &mut MorphContext) -> Self {
@@ -78,12 +100,18 @@ impl MorphApp for App {
         );
         sdf.upload_glyph_table(ctx.queue(), &atlas.glyph_table_u32s());
         // Two seconds of output; the tts thread waits when it is full.
+        #[cfg(feature = "stt-moshi-xn")]
+        let mut speaking = std::sync::Arc::default();
         let playback = ctx.audio().format().map(|format| {
             let (producer, consumer) = playback::ring(
                 format.sample_rate as usize * 2,
                 format.channels,
                 format.sample_rate,
             );
+            #[cfg(feature = "stt-moshi-xn")]
+            {
+                speaking = consumer.speaking();
+            }
             ctx.audio().add_source(playback::source(consumer));
             log::info!(
                 "playback: {} Hz, {} channels",
@@ -104,10 +132,49 @@ impl MorphApp for App {
             list: DrawList::new(),
             tts: TtsWorker::spawn(model, playback, None),
             status: "loading\u{2026}".into(),
+            #[cfg(feature = "stt-moshi-xn")]
+            speaking,
+            #[cfg(feature = "stt-moshi-xn")]
+            capture: None,
+            #[cfg(feature = "stt-moshi-xn")]
+            capture_log: Duration::ZERO,
         }
     }
 
-    fn update(&mut self, _ctx: &mut MorphContext, _dt: Duration) {
+    #[cfg(feature = "stt-moshi-xn")]
+    fn on_capture_ready(&mut self, ctx: &mut MorphContext) {
+        let Some(format) = ctx.audio().capture_format() else {
+            return;
+        };
+        log::info!(
+            "capture: {} Hz, {} channels, mode {:?}",
+            format.sample_rate,
+            format.channels,
+            ctx.audio().capture_mode()
+        );
+        // Four seconds of 24 kHz mono; the stt thread reads it every frame.
+        let (sink, capture) = stt::capture(format, self.speaking.clone(), 4);
+        ctx.audio().add_sink(sink);
+        self.capture = Some(capture);
+    }
+
+    fn update(&mut self, _ctx: &mut MorphContext, dt: Duration) {
+        #[cfg(feature = "stt-moshi-xn")]
+        if let Some(capture) = &mut self.capture {
+            // Nothing reads the capture yet (plan 20261022_02, step 1).
+            let n = capture.ring.slots();
+            if let Ok(chunk) = capture.ring.read_chunk(n) {
+                chunk.commit_all();
+            }
+            self.capture_log += dt;
+            if self.capture_log >= Duration::from_secs(2) {
+                self.capture_log = Duration::ZERO;
+                let (peak, dropped) = capture.stats.take();
+                log::info!("capture: peak {peak:.3}, dropped {dropped}");
+            }
+        }
+        #[cfg(not(feature = "stt-moshi-xn"))]
+        let _ = dt;
         for event in self.tts.poll() {
             log::info!("tts: {event:?}");
             match event {
