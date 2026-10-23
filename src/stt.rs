@@ -162,29 +162,25 @@ impl Stt {
         #[cfg(feature = "stt-moshi-xn-boost")]
         let mut state = state;
         #[cfg(feature = "stt-moshi-xn-boost")]
-        let (vocab_slot, loaded_vocab) = {
-            let phrases = match &settings.vocab {
-                Some(path) => crate::boost::read_vocab(path).map_err(|e| fail("vocab", &e))?,
-                None => Vec::new(),
-            };
+        let vocab_slot = {
             let (start, cont) = settings.boost;
-            let booster = crate::boost::VocabBooster::from_phrases(&decoder, &phrases, start, cont);
-            let loaded = settings.vocab.as_ref().map(|path| {
-                log::info!(
-                    "stt: boosting {} phrases ({} token sequences) from {}, start {start}, cont {cont}",
-                    phrases.len(),
-                    booster.len(),
-                    path.display()
-                );
-                (phrases.len(), booster.len())
-            });
+            let booster = crate::boost::VocabBooster::from_phrases(&decoder, &[], start, cont);
             let (booster, slot) = booster.with_slot();
             state
                 .set_booster(Box::new(booster))
                 .map_err(|e| fail("booster", &e))?;
-            (slot, loaded)
+            slot
         };
-        Ok(Self {
+        #[cfg(feature = "stt-moshi-xn-boost")]
+        let vocab = match &settings.vocab {
+            Some(path) => Some((
+                path,
+                crate::boost::read_vocab(path).map_err(|e| fail("vocab", &e))?,
+            )),
+            None => None,
+        };
+        #[allow(unused_mut)]
+        let mut stt = Self {
             state,
             mask: xn::streaming::StreamMask::all_active(1),
             decoder,
@@ -194,8 +190,21 @@ impl Stt {
             #[cfg(feature = "stt-moshi-xn-boost")]
             vocab_slot,
             #[cfg(feature = "stt-moshi-xn-boost")]
-            loaded_vocab,
-        })
+            loaded_vocab: None,
+        };
+        // The list at load goes the way of a list asked for later.
+        #[cfg(feature = "stt-moshi-xn-boost")]
+        if let Some((path, phrases)) = vocab {
+            let (start, cont) = settings.boost;
+            log::info!(
+                "stt: boosting {} phrases from {}, start {start}, cont {cont}",
+                phrases.len(),
+                path.display()
+            );
+            let sequences = stt.set_vocab(&phrases);
+            stt.loaded_vocab = Some((phrases.len(), sequences));
+        }
+        Ok(stt)
     }
 
     /// Encodes `phrases` and hands the table to the booster, which uses it
