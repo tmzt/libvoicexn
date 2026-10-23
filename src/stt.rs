@@ -79,6 +79,13 @@ pub(crate) struct Stt {
     tokens: Vec<u32>,
     decoded: usize,
     pub(crate) asr_delay_in_tokens: usize,
+    /// The other end of the attached booster's slot (plan 20261022_07,
+    /// decision 2).
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    vocab_slot: crate::boost::BoostSlot,
+    /// The phrases and sequences of `SttConfig::vocab`, until reported.
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    loaded_vocab: Option<(usize, usize)>,
 }
 
 /// Mimi's frame: 80 ms at 24 kHz.
@@ -150,23 +157,33 @@ impl Stt {
         }
         .map_err(|e| fail("lm", &e))?;
         log::info!("stt: LM {file}");
+        // A booster is always attached, empty without a list, so that one
+        // can arrive later (plan 20261022_07, decision 3).
         #[cfg(feature = "stt-moshi-xn-boost")]
         let mut state = state;
         #[cfg(feature = "stt-moshi-xn-boost")]
-        if let Some(path) = &settings.vocab {
-            let phrases = crate::boost::read_vocab(path).map_err(|e| fail("vocab", &e))?;
+        let (vocab_slot, loaded_vocab) = {
+            let phrases = match &settings.vocab {
+                Some(path) => crate::boost::read_vocab(path).map_err(|e| fail("vocab", &e))?,
+                None => Vec::new(),
+            };
             let (start, cont) = settings.boost;
             let booster = crate::boost::VocabBooster::from_phrases(&decoder, &phrases, start, cont);
-            log::info!(
-                "stt: boosting {} phrases ({} token sequences) from {}, start {start}, cont {cont}",
-                phrases.len(),
-                booster.len(),
-                path.display()
-            );
+            let loaded = settings.vocab.as_ref().map(|path| {
+                log::info!(
+                    "stt: boosting {} phrases ({} token sequences) from {}, start {start}, cont {cont}",
+                    phrases.len(),
+                    booster.len(),
+                    path.display()
+                );
+                (phrases.len(), booster.len())
+            });
+            let (booster, slot) = booster.with_slot();
             state
                 .set_booster(Box::new(booster))
                 .map_err(|e| fail("booster", &e))?;
-        }
+            (slot, loaded)
+        };
         Ok(Self {
             state,
             mask: xn::streaming::StreamMask::all_active(1),
@@ -174,7 +191,29 @@ impl Stt {
             tokens: Vec::new(),
             decoded: 0,
             asr_delay_in_tokens,
+            #[cfg(feature = "stt-moshi-xn-boost")]
+            vocab_slot,
+            #[cfg(feature = "stt-moshi-xn-boost")]
+            loaded_vocab,
         })
+    }
+
+    /// Encodes `phrases` and hands the table to the booster, which uses it
+    /// from its next token. Returns the sequences boosted.
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    pub(crate) fn set_vocab(&mut self, phrases: &[String]) -> usize {
+        let t = std::time::Instant::now();
+        let table = crate::boost::BoostTable::from_phrases(&self.decoder, phrases);
+        let sequences = table.len();
+        if let Ok(mut slot) = self.vocab_slot.lock() {
+            *slot = Some(table);
+        }
+        log::info!(
+            "stt: vocabulary of {} phrases ({sequences} sequences) encoded in {:.2} ms",
+            phrases.len(),
+            t.elapsed().as_secs_f64() * 1000.0
+        );
+        sequences
     }
 
     /// Feeds one 80 ms frame of 24 kHz mono.
@@ -377,14 +416,56 @@ pub enum SttEvent {
     /// The tap-to-talk gate changed state (plan 20261022_03).
     #[cfg(feature = "vad-earshot")]
     Gate(crate::vad::GateState),
+    /// A phrase list took effect (plan 20261022_07): at load from
+    /// `SttConfig::vocab`, and after each [`SttRequest::Vocabulary`].
+    /// `sequences` counts the token sequences boosted (each phrase as
+    /// written and capitalized).
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    Vocabulary {
+        phrases: usize,
+        sequences: usize,
+    },
 }
 
-/// What the app asks of the `stt` thread (plan 20261022_03, decision 5).
-#[cfg(feature = "vad-earshot")]
-#[derive(Clone, Copy, Debug)]
+/// What the app asks of the `stt` thread (plan 20261022_03, decision 5,
+/// and plan 20261022_07). Without `vad-earshot` there is no gate, and `Arm`
+/// and `Close` do nothing.
+#[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
+#[derive(Clone, Debug)]
 pub enum SttRequest {
     Arm,
     Close,
+    /// Replaces the boosted phrases from the next utterance on; an empty
+    /// list turns the boost off. Phrases are trimmed and empty ones dropped.
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    Vocabulary(Vec<String>),
+}
+
+/// A phrase list waiting for the next boundary between utterances
+/// (plan 20261022_07, decision 5 and its amendment).
+#[cfg(feature = "stt-moshi-xn-boost")]
+#[derive(Default)]
+struct VocabSwap {
+    next: Option<Vec<String>>,
+}
+
+#[cfg(feature = "stt-moshi-xn-boost")]
+impl VocabSwap {
+    /// Replaces any list still waiting.
+    fn offer(&mut self, list: Vec<String>) {
+        let list = list
+            .iter()
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .map(String::from)
+            .collect();
+        self.next = Some(list);
+    }
+
+    /// The list waiting, if `at_boundary`.
+    fn take(&mut self, at_boundary: bool) -> Option<Vec<String>> {
+        if at_boundary { self.next.take() } else { None }
+    }
 }
 
 /// The `stt` thread: it loads the model, then steps it on each 80 ms frame
@@ -392,14 +473,14 @@ pub enum SttRequest {
 /// `vad-earshot`, on what the gate lets through.
 pub struct SttWorker {
     rx: std::sync::mpsc::Receiver<SttEvent>,
-    #[cfg(feature = "vad-earshot")]
+    #[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
     tx: std::sync::mpsc::Sender<SttRequest>,
 }
 
 impl SttWorker {
     pub fn spawn(config: SttConfig, capture: Capture) -> Self {
         let (events, rx) = std::sync::mpsc::channel();
-        #[cfg(feature = "vad-earshot")]
+        #[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
         let (tx, requests) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("stt".into())
@@ -410,12 +491,15 @@ impl SttWorker {
                 #[cfg(feature = "vad-earshot")]
                 listener.run_gated(&requests);
                 #[cfg(not(feature = "vad-earshot"))]
-                listener.run();
+                listener.run(
+                    #[cfg(feature = "stt-moshi-xn-boost")]
+                    &requests,
+                );
             })
             .expect("spawning the stt thread");
         Self {
             rx,
-            #[cfg(feature = "vad-earshot")]
+            #[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
             tx,
         }
     }
@@ -424,7 +508,7 @@ impl SttWorker {
         self.rx.try_iter()
     }
 
-    #[cfg(feature = "vad-earshot")]
+    #[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
     pub fn send(&self, req: SttRequest) {
         let _ = self.tx.send(req);
     }
@@ -441,6 +525,8 @@ struct Listener {
     steps: u32,
     step_time: std::time::Duration,
     dropped_at_load: u64,
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    vocab: VocabSwap,
 }
 
 /// The app has gone: the thread ends.
@@ -479,6 +565,8 @@ impl Listener {
             steps: 0,
             step_time: std::time::Duration::ZERO,
             dropped_at_load,
+            #[cfg(feature = "stt-moshi-xn-boost")]
+            vocab: VocabSwap::default(),
         })
     }
 
@@ -541,11 +629,45 @@ impl Listener {
         Ok(ended)
     }
 
-    /// Always listening: every frame goes to STT.
+    /// Applies a list waiting in `vocab` if `at_boundary`, or else
+    /// reports the list from load, once (plan 20261022_07, decision 5).
+    #[cfg(feature = "stt-moshi-xn-boost")]
+    fn apply_vocab(&mut self, at_boundary: bool) -> Result<(), Gone> {
+        if let Some(list) = self.vocab.take(at_boundary) {
+            // A list asked for during the load takes the place of its own.
+            self.stt.loaded_vocab = None;
+            let sequences = self.stt.set_vocab(&list);
+            self.send(SttEvent::Vocabulary {
+                phrases: list.len(),
+                sequences,
+            })?;
+        } else if let Some((phrases, sequences)) = self.stt.loaded_vocab.take() {
+            self.send(SttEvent::Vocabulary { phrases, sequences })?;
+        }
+        Ok(())
+    }
+
+    /// Always listening: every frame goes to STT. A new phrase list waits
+    /// until the segmenter holds no words.
     #[cfg(not(feature = "vad-earshot"))]
-    fn run(&mut self) {
+    fn run(
+        &mut self,
+        #[cfg(feature = "stt-moshi-xn-boost")] requests: &std::sync::mpsc::Receiver<SttRequest>,
+    ) {
         let mut frame = Vec::with_capacity(FRAME);
         loop {
+            #[cfg(feature = "stt-moshi-xn-boost")]
+            {
+                for req in requests.try_iter() {
+                    if let SttRequest::Vocabulary(list) = req {
+                        self.vocab.offer(list);
+                    }
+                }
+                let quiet = self.segmenter.partial().is_empty();
+                if self.apply_vocab(quiet).is_err() {
+                    return;
+                }
+            }
             if self.read(FRAME, &mut frame) && self.feed(&frame).is_err() {
                 return;
             }
@@ -574,11 +696,19 @@ impl Listener {
                         gate.arm()
                     }
                     SttRequest::Close => gate.close(),
+                    #[cfg(feature = "stt-moshi-xn-boost")]
+                    SttRequest::Vocabulary(list) => {
+                        self.vocab.offer(list);
+                        None
+                    }
                 };
                 if let Some(state) = changed {
                     self.send(SttEvent::Gate(state))?;
                 }
             }
+            // A new phrase list waits until the gate is idle.
+            #[cfg(feature = "stt-moshi-xn-boost")]
+            self.apply_vocab(gate.state() == GateState::Idle)?;
             if !self.read(SUB, &mut sub) || !gate.listening() {
                 continue; // idle: the frame is dropped unheard
             }
@@ -641,5 +771,39 @@ mod segmenter_tests {
             assert_eq!(s.push(""), None);
         }
         assert_eq!(s.push("").as_deref(), Some("one two"));
+    }
+}
+
+#[cfg(all(test, feature = "stt-moshi-xn-boost"))]
+mod vocab_swap_tests {
+    use super::*;
+
+    fn list(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn the_last_list_offered_wins() {
+        let mut swap = VocabSwap::default();
+        swap.offer(list(&["libmorph"]));
+        swap.offer(list(&[" libmsdf ", "", "  ", "libcontrols"]));
+        assert_eq!(swap.take(true), Some(list(&["libmsdf", "libcontrols"])));
+        assert_eq!(swap.take(true), None, "taken once");
+    }
+
+    #[test]
+    fn nothing_is_taken_mid_utterance() {
+        let mut swap = VocabSwap::default();
+        swap.offer(list(&["libmorph"]));
+        assert_eq!(swap.take(false), None);
+        assert_eq!(swap.take(false), None);
+        assert_eq!(swap.take(true), Some(list(&["libmorph"])));
+    }
+
+    #[test]
+    fn an_empty_list_is_offered_as_empty() {
+        let mut swap = VocabSwap::default();
+        swap.offer(Vec::new());
+        assert_eq!(swap.take(true), Some(Vec::new()));
     }
 }
