@@ -1,7 +1,7 @@
 ---
 title: Changing the STT vocabulary boost while the model runs
 date: 2026-10-22
-status: Draft
+status: In implementation
 covers:
   - Replacing the boosted phrase list of a running `SttWorker`, under
     `stt-moshi-xn-boost`: a new `SttRequest::Vocabulary(Vec<String>)` and a
@@ -229,3 +229,10 @@ text; "amend it, the answers are fine". This replaces decision 4, the
   and the request carries only phrases (1); in always-listening mode a list
   waits for the end of the current utterance (2); `SttEvent::Vocabulary`
   counts only the phrases and sequences applied (3).
+
+## Amendment — 2026-10-23 18:25 EDT: approved; implementation started
+
+The owner (2026-10-23): "Yes, start implementing it", after the amendment
+of 2026-10-22 16:34 EDT. `status` is now `In implementation`, and the
+document is immutable from here on (AGENTS.md Rule 1.5). Step 1 is in the
+commit that carries this amendment.

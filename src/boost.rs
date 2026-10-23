@@ -1,8 +1,11 @@
 //! Boosting a vocabulary list (docs/design/20261022_04_STT_VOCAB_BOOST_PLAN.md):
 //! a `TokenBooster` that nudges Kyutai STT toward the token sequences of
-//! the phrases in a list, as it writes them.
+//! the phrases in a list, as it writes them. Its list can be replaced while
+//! the model runs (docs/design/20261022_07_STT_RUNTIME_VOCAB_PLAN.md,
+//! decision 2), through a [`BoostSlot`].
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use crate::spm::Decoder;
 
@@ -16,30 +19,22 @@ const PADS: [u32; 2] = [3, 4];
 pub(crate) const START: f32 = 1.5;
 pub(crate) const CONT: f32 = 8.0;
 
-pub struct VocabBooster {
-    /// Each phrase's tokens, as written and capitalized.
+/// The token sequences of a phrase list.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BoostTable {
+    /// Each phrase's tokens, as written and capitalized; none is empty.
     phrases: Vec<Vec<u32>>,
-    /// Matches in progress: (phrase, how many tokens matched).
-    active: Vec<(usize, usize)>,
-    /// Which tokens start a word (their piece begins with `▁`).
-    word_starts: Vec<bool>,
-    start: f32,
-    cont: f32,
 }
 
-impl VocabBooster {
-    pub fn new(phrases: Vec<Vec<u32>>, word_starts: Vec<bool>, start: f32, cont: f32) -> Self {
+impl BoostTable {
+    pub fn new(phrases: Vec<Vec<u32>>) -> Self {
         Self {
             phrases: phrases.into_iter().filter(|p| !p.is_empty()).collect(),
-            active: Vec::new(),
-            word_starts,
-            start,
-            cont,
         }
     }
 
     /// Encodes each phrase as written and with a capital first letter.
-    pub fn from_phrases(decoder: &Decoder, phrases: &[String], start: f32, cont: f32) -> Self {
+    pub fn from_phrases(decoder: &Decoder, phrases: &[String]) -> Self {
         let mut tokens = Vec::new();
         for phrase in phrases {
             let mut chars = phrase.chars();
@@ -56,10 +51,61 @@ impl VocabBooster {
                 }
             }
         }
+        Self::new(tokens)
+    }
+
+    /// The token sequences boosted.
+    pub fn len(&self) -> usize {
+        self.phrases.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.phrases.is_empty()
+    }
+}
+
+/// The next table for a running [`VocabBooster`]: whoever holds the slot
+/// puts one in, and the booster takes it on its next token.
+pub type BoostSlot = Arc<Mutex<Option<BoostTable>>>;
+
+pub struct VocabBooster {
+    /// The table in use (see [`BoostTable`]).
+    phrases: Vec<Vec<u32>>,
+    /// Matches in progress: (phrase, how many tokens matched).
+    active: Vec<(usize, usize)>,
+    /// Which tokens start a word (their piece begins with `▁`).
+    word_starts: Vec<bool>,
+    start: f32,
+    cont: f32,
+    slot: BoostSlot,
+}
+
+impl VocabBooster {
+    pub fn new(phrases: Vec<Vec<u32>>, word_starts: Vec<bool>, start: f32, cont: f32) -> Self {
+        Self {
+            phrases: BoostTable::new(phrases).phrases,
+            active: Vec::new(),
+            word_starts,
+            start,
+            cont,
+            slot: BoostSlot::default(),
+        }
+    }
+
+    /// Encodes each phrase as written and with a capital first letter.
+    pub fn from_phrases(decoder: &Decoder, phrases: &[String], start: f32, cont: f32) -> Self {
+        let table = BoostTable::from_phrases(decoder, phrases);
         let word_starts = (0..decoder.len() as u32)
             .map(|id| decoder.starts_word(id))
             .collect();
-        Self::new(tokens, word_starts, start, cont)
+        Self::new(table.phrases, word_starts, start, cont)
+    }
+
+    /// The booster and the other end of its slot, for whoever replaces its
+    /// table while the model runs.
+    pub fn with_slot(self) -> (Self, BoostSlot) {
+        let slot = self.slot.clone();
+        (self, slot)
     }
 
     pub fn len(&self) -> usize {
@@ -73,6 +119,13 @@ impl VocabBooster {
 
 impl xn_moshi::asr::TokenBooster for VocabBooster {
     fn on_text_token(&mut self, token: u32) {
+        // Only the stt thread locks the slot, so this never waits.
+        if let Ok(mut next) = self.slot.try_lock()
+            && let Some(table) = next.take()
+        {
+            self.phrases = table.phrases;
+            self.active.clear();
+        }
         if ENDS.contains(&token) {
             self.active.clear();
             return;
@@ -201,6 +254,39 @@ mod tests {
     }
 
     #[test]
+    fn a_table_in_the_slot_replaces_the_old_one_on_the_next_token() {
+        let (mut b, slot) = booster().with_slot();
+        b.on_text_token(10);
+        assert_eq!(sorted(b.text_biases()), [(10, 1.5), (11, 4.0), (20, 4.0)]);
+        *slot.lock().unwrap() = Some(BoostTable::new(vec![vec![30, 31]]));
+        assert_eq!(
+            sorted(b.text_biases()),
+            [(10, 1.5), (11, 4.0), (20, 4.0)],
+            "the old list boosts until the new one is taken"
+        );
+        b.on_text_token(11);
+        assert_eq!(
+            b.text_biases(),
+            [(30, 1.5)],
+            "the match in progress is gone"
+        );
+        assert!(slot.lock().unwrap().is_none());
+        b.on_text_token(30);
+        assert_eq!(sorted(b.text_biases()), [(30, 1.5), (31, 4.0)]);
+    }
+
+    #[test]
+    fn an_empty_table_gives_no_biases() {
+        let (mut b, slot) = booster().with_slot();
+        *slot.lock().unwrap() = Some(BoostTable::new(vec![vec![]]));
+        b.on_text_token(10);
+        assert!(b.is_empty());
+        assert_eq!(b.text_biases(), []);
+        b.on_text_token(30);
+        assert_eq!(b.text_biases(), []);
+    }
+
+    #[test]
     fn the_real_tokenizer_gives_each_name_two_variants() {
         let path = Path::new("models/stt-1b-en_fr/tokenizer.model");
         if !path.exists() {
@@ -210,5 +296,7 @@ mod tests {
         let b = VocabBooster::from_phrases(&d, &["libmorph".into(), "libmsdf".into()], START, CONT);
         assert_eq!(b.len(), 4);
         assert!(b.phrases.iter().all(|p| p.len() >= 2), "{:?}", b.phrases);
+        let table = BoostTable::from_phrases(&d, &["libmorph".into(), "libmsdf".into()]);
+        assert_eq!(table.phrases, b.phrases);
     }
 }
