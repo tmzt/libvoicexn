@@ -195,6 +195,10 @@ impl App {
                     };
                     self.stt_status = self.stt_doing.into();
                 }
+                #[cfg(feature = "stt-moshi-xn-boost")]
+                stt::SttEvent::Vocabulary { phrases, sequences } => {
+                    log::info!("stt: vocabulary {phrases} phrases ({sequences} sequences)");
+                }
             }
         }
         for text in heard {
