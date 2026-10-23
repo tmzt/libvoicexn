@@ -209,6 +209,10 @@ fn run(args: Args) -> Result<(), String> {
                     gate = state;
                     terminal.log(|| log::info!("stt: gate {state:?}"));
                 }
+                #[cfg(feature = "stt-moshi-xn-boost")]
+                SttEvent::Vocabulary { phrases, sequences } => terminal.log(|| {
+                    log::info!("stt: vocabulary {phrases} phrases ({sequences} sequences)")
+                }),
             }
         }
         for event in tts.poll() {
