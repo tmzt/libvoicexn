@@ -394,3 +394,59 @@ Plan: `docs/design/20261029_01_SESSION_PLAN.md` (Draft), steps 0 to 6.
   step waits for the tag.
 
 Not started: it is for the owner's review first.
+
+## 2026-10-29 11:10 EDT — Runtime vocabulary, steps 4 and 5: departures
+
+Plan `docs/design/20261022_07_STT_RUNTIME_VOCAB_PLAN.md`; `71a7883` (tag
+`v0.3.0`).
+- Step 4's M4 runs were made on 2026-10-23 (logs `out/stt/p07_*`). On the
+  S23, today, the APK of 2026-10-23 loaded `vocab.txt` and sent
+  `SttEvent::Vocabulary` with 9 phrases and 18 sequences
+  (`out/stt/p07_s23_vocab_load.log`). The tap-to-talk turn needs a person
+  at the phone and is checked with the owner before anything is pushed.
+- Step 5 was committed and tagged before that turn, so that the session
+  plan (`20261029_01`), whose step 0 needs `v0.3.0`, could build on it.
+  The tag is not pushed until the turn has been heard.
+
+## 2026-10-29 11:10 EDT — Speech session, steps 1 to 6: departures
+
+Plan `docs/design/20261029_01_SESSION_PLAN.md`; `c35a412` to `7caeb92`
+(tag `v0.4.0`).
+- Step 1: `Playback::new(consumer, flush)` drains the ring in place
+  through a private `Consumer::drain`, not flankr's scratch loop, so it
+  needs no capacity. `with_cue` takes a mono cue and spreads it over the
+  output's channels (the plan said interleaved), as flankr's chime did.
+  `Playback::speaking` is added.
+- Step 2: `SessionEvent` also has `Voice(bool)` (flankr's
+  `Input::Voice`), and `Vocabulary` carries `sequences` as well as
+  `phrases`. `Action::Vocabulary` without a `vocab_file` gives no
+  event (flankr gave `VocabularyFailed`), since the running model takes
+  the list. The stop timing needed an output device, so it was measured
+  after step 3 through `open_default_output`: 20 runs each, Stop to
+  `Speaking(false)` averaged 11.1 ms for flankr-audio and for the
+  session (medians 10.5 and 12.0 ms; `out/session/20261029_02_stop/`).
+- Step 3: `session` implies only `stt-moshi-xn`, with the gate when
+  `vad-earshot` is on, so that voicexn-tty's always-listening build runs
+  on it. `Action::Close` closes the gate (voicexn-tty's Enter while
+  listening). `SessionConfig::echo_mute` (on by default) is turned off
+  for `--input`, which has no echo, so the M4 runs are unchanged. This
+  shell has no microphone (CoreAudio `!obj`, through cpal and libmorph
+  alike). voicexn-tty heard plan 04's three WAVs through
+  `open_default_output` with the same text as at 0.3.0
+  (`out/session/20261029_01_tty_input/`); hearing the Mac's microphone
+  is checked with the owner.
+- Step 4: `examples/voicexn` keeps its own workers and uses the two
+  closures with `Mic` and `Consumer`, not `Session`. It speaks before
+  the microphone is open and has a text-to-speech-only build, and
+  `Session::spawn` needs both ends and `stt-moshi-xn`. The README shows
+  both forms. On the S23 the APK opened capture in `VoiceRecognition`
+  mode and loaded STT with the vocabulary through the closures
+  (`out/session/20261029_03_voicexn_s23_load.log`). The tap-to-talk turn
+  is checked with the owner.
+- Step 5: the scripts were run on the S23 with the defaults, and with
+  `APP_ID`, `VOICEXN_MODELS` and `STAGE` set, still pointed at voicexn,
+  so as not to overwrite another app's data
+  (`out/session/20261029_04_scripts/`). A wrong `APP_ID` fails at
+  `run-as`. RoundTwo is the first other app to use them.
+- Step 6: `v0.4.0` is tagged; it and `v0.3.0` are pushed with the branch
+  once the owner has heard the turns above.
