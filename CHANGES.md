@@ -364,3 +364,33 @@ approval: replace the STT boost's phrase list on a running `SttWorker`
 thread and applied only between utterances, as libvoicexn 0.3.0.
 Plan: `docs/design/20261022_07_STT_RUNTIME_VOCAB_PLAN.md` (Draft), five
 steps. Not started: it is for the owner's review first.
+
+## 2026-10-29 10:49 EDT — Speech session plan: flankr-audio's plumbing, no libmorph, cpal optional; 0.4.0
+
+New planned work, asked for by the owner from RoundTwo's session: the
+generic speech plumbing of flankr's `flankr-audio` moves here, so flankr
+and RoundTwo both build on libvoicexn and neither copies it. It is the
+next minor (breaking) release, 0.4.0, after 0.3.0 (plan 07).
+Plan: `docs/design/20261029_01_SESSION_PLAN.md` (Draft), steps 0 to 6.
+
+- Added: a `session` module (`Session::spawn`, `act`, `poll`,
+  `SessionConfig`, `Action`, `SessionEvent`, `session::pump`), and
+  `playback::Playback` in the core (a flush at any time, the tail zeroed,
+  an optional cue).
+- Added: a `cpal` feature, `Session::open_default`, for apps without
+  libmorph. This reverses decision 8 of the split plan
+  (`20261022_05`), which stays frozen; `voicexn-tty` moves onto it.
+- **Breaking:** the `morph` feature, `src/morph.rs` and the libmorph
+  dependency are removed, changing decision 4 of the split plan. libmorph
+  apps use the two closures in the README section "Using libvoicexn in a
+  libmorph app", on their own libmorph revision. That is the intended
+  path, not a workaround: on Android libmorph must own the streams, and
+  libmorph already brings cpal. The pin at `bb0174d` forced lockstep with
+  libmorph through `links = "libmorph"`.
+- Scripts: `push-model.sh`, `push-stt.sh` and `push-vocab.sh` take
+  `APP_ID`, `VOICEXN_MODELS` and `STAGE`, with flankr's fixes merged in.
+  Quantising stays in `fetch-stt.sh`.
+- Not here: flankr moves onto 0.4.0 in its own commits; RoundTwo's speech
+  step waits for the tag.
+
+Not started: it is for the owner's review first.
