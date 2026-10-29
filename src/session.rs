@@ -1,6 +1,6 @@
 //! A speech session for an app, behind `session`
-//! (docs/design/20261029_01_SESSION_PLAN.md): both workers, the earshot
-//! gate behind the STT worker, the speaker's ring and the [`Pump`] that
+//! (docs/design/20261029_01_SESSION_PLAN.md): both workers, with
+//! `vad-earshot` the gate behind the STT worker, the speaker's ring and the [`Pump`] that
 //! says when the app is speaking and listening. Moved from flankr's
 //! `flankr-audio` 0.2.0, without its flankr types.
 //!
@@ -13,6 +13,8 @@
 //!
 //! [`Pump`]: pump::Pump
 
+#[cfg(feature = "cpal")]
+mod devices;
 pub mod pump;
 
 use std::path::{Path, PathBuf};
@@ -24,6 +26,7 @@ use crate::config::{SttConfig, TtsConfig};
 use crate::playback::{self, Playback};
 use crate::stt::SttWorker;
 use crate::tts::TtsWorker;
+#[cfg(feature = "vad-earshot")]
 use crate::vad::GateState;
 
 /// The speaker's ring, in seconds of output.
@@ -52,6 +55,10 @@ pub struct SessionConfig {
     /// (`VOICEXN_VOCAB` included); [`Action::Vocabulary`] writes it for the
     /// next start. `None` reads and writes nothing.
     pub vocab_file: Option<PathBuf>,
+    /// Mute the microphone while the speaker plays, so STT does not hear
+    /// Phonon. On by default; off for input that has no echo, such as a
+    /// file.
+    pub echo_mute: bool,
 }
 
 impl SessionConfig {
@@ -65,6 +72,7 @@ impl SessionConfig {
             tts: TtsConfig::for_platform(models.join("phonon-31m-en")),
             voice: None,
             vocab_file: None,
+            echo_mute: true,
         }
     }
 }
@@ -76,8 +84,10 @@ pub enum Action {
     Speak(String),
     /// Stop Phonon and drop what is queued for the speaker.
     Stop,
-    /// Arm the gate: tap to talk.
+    /// With `vad-earshot`, arm the gate: tap to talk.
     Arm,
+    /// With `vad-earshot`, close the gate while it is listening.
+    Close,
     /// Replace the boosted phrases: on the running model from the next
     /// utterance with `stt-moshi-xn-boost`, and in `vocab_file` for the
     /// next start.
@@ -94,14 +104,16 @@ pub enum SessionEvent {
     Utterance(String),
     /// The utterance so far.
     Partial(String),
-    /// From the tap (`Armed`) until the utterance has ended (`Idle`).
+    /// With `vad-earshot`: from the tap (`Armed`) until the utterance has
+    /// ended (`Idle`).
     Listening(bool),
-    /// The gate is open on speech.
+    /// With `vad-earshot`: the gate is open on speech.
     Voice(bool),
     /// From the first `Speak` until nothing is queued, nothing is being
     /// made and the speaker's ring has run dry.
     Speaking(bool),
     /// The earshot gate changed.
+    #[cfg(feature = "vad-earshot")]
     Gate(GateState),
     /// The STT model is loaded; [`Action::Arm`] works from here.
     SttLoaded { load_ms: u32 },
@@ -149,6 +161,8 @@ pub struct Session {
     playing: Arc<AtomicBool>,
     /// Events made by [`act`](Self::act), given by the next poll.
     pending: Vec<SessionEvent>,
+    #[cfg(feature = "cpal")]
+    _streams: Option<devices::Streams>,
 }
 
 impl Session {
@@ -160,12 +174,20 @@ impl Session {
         let (producer, consumer) = playback::ring(capacity, output.channels, output.rate);
         let playing = consumer.speaking();
         // Muted while the speaker plays, so STT does not hear Phonon.
-        let (mic, capture) = Mic::new(input.rate, input.channels, playing.clone(), CAPTURE_SECONDS);
+        let mute = if config.echo_mute {
+            playing.clone()
+        } else {
+            Arc::new(AtomicBool::new(false))
+        };
+        let (mic, capture) = Mic::new(input.rate, input.channels, mute, CAPTURE_SECONDS);
         let flush = Arc::new(AtomicU32::new(0));
         let cues = Arc::new(AtomicU32::new(0));
         let playback = Playback::new(consumer, flush.clone())
             .with_cue(playback::chime(output.rate), cues.clone());
 
+        // A vocabulary file the app wrote last time wins over the list
+        // `SttConfig::for_platform` found.
+        #[cfg_attr(not(feature = "stt-moshi-xn-boost"), allow(unused_mut))]
         let mut stt_config = config.stt;
         #[cfg(feature = "stt-moshi-xn-boost")]
         if let Some(path) = config.vocab_file.as_ref().filter(|p| p.is_file()) {
@@ -189,8 +211,40 @@ impl Session {
             cues,
             playing,
             pending: Vec::new(),
+            #[cfg(feature = "cpal")]
+            _streams: None,
         };
         (session, mic, playback)
+    }
+
+    /// Opens the default input and output devices with cpal and starts the
+    /// session on them; the session holds the streams.
+    #[cfg(feature = "cpal")]
+    pub fn open_default(config: SessionConfig) -> Result<Self, String> {
+        let (input, output) = (devices::Device::input()?, devices::Device::output()?);
+        let (mut session, mic, playback) = Self::spawn(config, input.format(), output.format());
+        session._streams = Some(devices::Streams {
+            _output: output.play(playback)?,
+            _input: Some(input.capture(mic)?),
+        });
+        Ok(session)
+    }
+
+    /// Opens only the default output device with cpal, for a microphone the
+    /// caller feeds through the returned [`Mic`] in `input`'s format: a
+    /// machine with no input device, or audio from a file.
+    #[cfg(feature = "cpal")]
+    pub fn open_default_output(
+        config: SessionConfig,
+        input: Format,
+    ) -> Result<(Self, Mic), String> {
+        let output = devices::Device::output()?;
+        let (mut session, mic, playback) = Self::spawn(config, input, output.format());
+        session._streams = Some(devices::Streams {
+            _output: output.play(playback)?,
+            _input: None,
+        });
+        Ok((session, mic))
     }
 
     /// Carries out one [`Action`].
@@ -201,6 +255,7 @@ impl Session {
         if let Some(req) = pump::tts_request(&action, self.voice.as_deref()) {
             self.tts.send(req);
         }
+        #[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
         if let Some(req) = pump::stt_request(&action) {
             self.stt.send(req);
         }
@@ -216,7 +271,7 @@ impl Session {
             Action::Cue => {
                 self.cues.fetch_add(1, Ordering::Release);
             }
-            Action::Speak(_) | Action::Arm => {}
+            Action::Speak(_) | Action::Arm | Action::Close => {}
         }
     }
 

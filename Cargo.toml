@@ -13,6 +13,9 @@ name = "libvoicexn"
 # The adapters of src/morph.rs, behind `morph`; the core does not need it.
 libmorph = { git = "https://github.com/tmzt/libmorph", rev = "bb0174d14f77e4b54a250e78293b3a9cb4a6617a", optional = true }
 log = "0.4"
+# The default devices for `Session::open_default`, behind `cpal`; the
+# version libmorph's libmobile uses.
+cpal = { version = "0.18.2", optional = true }
 # The realtime-safe ring between the tts thread and the audio thread.
 rtrb = "0.3"
 # Kyutai STT through xn (plan 20261022_02), behind `stt-moshi-xn`.
@@ -36,9 +39,12 @@ vad-earshot = ["stt-moshi-xn", "dep:earshot"]
 stt-moshi-xn-boost = ["stt-moshi-xn"]
 # libmorph Sink and Source adapters (plan 20261022_05, decision 4).
 morph = ["dep:libmorph"]
-# A speech session for an app: both workers, the gate and the pump
-# (plan 20261029_01).
-session = ["stt-moshi-xn", "vad-earshot"]
+# A speech session for an app: both workers and the pump, with the gate
+# when `vad-earshot` is on too (plan 20261029_01).
+session = ["stt-moshi-xn"]
+# The session on the default devices, for apps without libmorph
+# (plan 20261029_01, decision 3).
+cpal = ["session", "dep:cpal"]
 
 [dev-dependencies]
 tempfile = "3"

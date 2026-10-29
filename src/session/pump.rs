@@ -9,8 +9,11 @@
 //!   [`Pump`] adds `Listening`, `Voice` and `Speaking`, each only when it
 //!   changes.
 
-use crate::stt::{SttEvent, SttRequest};
+use crate::stt::SttEvent;
+#[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
+use crate::stt::SttRequest;
 use crate::tts::{TtsEvent, TtsRequest};
+#[cfg(feature = "vad-earshot")]
 use crate::vad::GateState;
 
 use super::{Action, SessionEvent};
@@ -23,15 +26,20 @@ pub fn tts_request(action: &Action, voice: Option<&str>) -> Option<TtsRequest> {
             voice: voice.map(str::to_string),
         }),
         Action::Stop => Some(TtsRequest::Stop),
-        Action::Arm | Action::Vocabulary(_) | Action::Cue => None,
+        Action::Arm | Action::Close | Action::Vocabulary(_) | Action::Cue => None,
     }
 }
 
-/// The STT worker's request for `action`: `Arm`, and with
-/// `stt-moshi-xn-boost`, `Vocabulary` for the running model.
+/// The STT worker's request for `action`: with `vad-earshot`, `Arm` and
+/// `Close`, and with `stt-moshi-xn-boost`, `Vocabulary` for the running
+/// model.
+#[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
 pub fn stt_request(action: &Action) -> Option<SttRequest> {
     match action {
+        #[cfg(feature = "vad-earshot")]
         Action::Arm => Some(SttRequest::Arm),
+        #[cfg(feature = "vad-earshot")]
+        Action::Close => Some(SttRequest::Close),
         #[cfg(feature = "stt-moshi-xn-boost")]
         Action::Vocabulary(words) => Some(SttRequest::Vocabulary(words.clone())),
         _ => None,
@@ -41,6 +49,7 @@ pub fn stt_request(action: &Action) -> Option<SttRequest> {
 /// Whether the gate counts as listening for `SessionEvent::Listening`: from the
 /// tap (`Armed`) until the utterance has ended (`Idle`), as
 /// [`Gate::listening`](crate::vad::Gate::listening) has it.
+#[cfg(feature = "vad-earshot")]
 pub fn gate_listening(state: GateState) -> bool {
     state != GateState::Idle
 }
@@ -61,8 +70,10 @@ pub struct Pump {
     /// The last `Speaking` given.
     speaking: bool,
     /// The last `Listening` given.
+    #[cfg(feature = "vad-earshot")]
     listening: bool,
     /// The last `Voice` given.
+    #[cfg(feature = "vad-earshot")]
     voice: bool,
 }
 
@@ -86,7 +97,7 @@ impl Pump {
                 None
             }
             // The cue is not speech: it holds no notice back.
-            Action::Arm | Action::Vocabulary(_) | Action::Cue => None,
+            Action::Arm | Action::Close | Action::Vocabulary(_) | Action::Cue => None,
         }
     }
 
@@ -102,6 +113,7 @@ impl Pump {
             SttEvent::Vocabulary { phrases, sequences } => {
                 vec![SessionEvent::Vocabulary { phrases, sequences }]
             }
+            #[cfg(feature = "vad-earshot")]
             SttEvent::Gate(state) => {
                 let mut out = vec![SessionEvent::Gate(state)];
                 let listening = gate_listening(state);
@@ -251,7 +263,16 @@ mod tests {
             Some(TtsRequest::Stop)
         ));
         assert!(tts_request(&Action::Arm, None).is_none());
-        assert!(matches!(stt_request(&Action::Arm), Some(SttRequest::Arm)));
+        assert!(tts_request(&Action::Close, None).is_none());
+        #[cfg(feature = "vad-earshot")]
+        {
+            assert!(matches!(stt_request(&Action::Arm), Some(SttRequest::Arm)));
+            assert!(matches!(
+                stt_request(&Action::Close),
+                Some(SttRequest::Close)
+            ));
+        }
+        #[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
         assert!(stt_request(&Action::Stop).is_none());
         // The running model takes the list only with the boost built in.
         #[cfg(feature = "stt-moshi-xn-boost")]
@@ -259,9 +280,10 @@ mod tests {
             stt_request(&Action::Vocabulary(vec!["claude".into()])),
             Some(SttRequest::Vocabulary(ref w)) if w == &["claude".to_string()]
         ));
-        #[cfg(not(feature = "stt-moshi-xn-boost"))]
+        #[cfg(all(feature = "vad-earshot", not(feature = "stt-moshi-xn-boost")))]
         assert!(stt_request(&Action::Vocabulary(vec![])).is_none());
         assert!(tts_request(&Action::Cue, None).is_none());
+        #[cfg(any(feature = "vad-earshot", feature = "stt-moshi-xn-boost"))]
         assert!(stt_request(&Action::Cue).is_none());
     }
 
@@ -279,6 +301,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "vad-earshot")]
     #[test]
     fn listening_follows_the_gate_from_the_tap_to_idle() {
         let mut pump = Pump::new();
