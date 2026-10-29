@@ -25,12 +25,12 @@ use crate::ui::{Layout, Line, SPOKEN, Screen, wrap};
 #[cfg(feature = "stt-moshi-xn")]
 use crate::ui::{MUTED, TEXT};
 use libvoicexn::config::TtsConfig;
+use libvoicexn::playback;
 #[cfg(feature = "stt-moshi-xn")]
 use libvoicexn::stt;
 use libvoicexn::tts::{TtsEvent, TtsRequest, TtsWorker};
 #[cfg(feature = "vad-earshot")]
 use libvoicexn::vad;
-use libvoicexn::{morph, playback};
 
 /// The frame rate while STT listens: enough for text, and far less heat
 /// than the display's 120 Hz.
@@ -253,8 +253,10 @@ impl MorphApp for App {
         // Two seconds of output; the tts thread waits when it is full.
         #[cfg(feature = "stt-moshi-xn")]
         let mut speaking = std::sync::Arc::default();
+        // libvoicexn's ends joined to libmorph by two closures (README,
+        // "Using libvoicexn in a libmorph app").
         let playback = ctx.audio().format().map(|format| {
-            let (producer, consumer) = playback::ring(
+            let (producer, mut consumer) = playback::ring(
                 format.sample_rate as usize * 2,
                 format.channels,
                 format.sample_rate,
@@ -263,7 +265,8 @@ impl MorphApp for App {
             {
                 speaking = consumer.speaking();
             }
-            ctx.audio().add_source(morph::source(consumer));
+            ctx.audio()
+                .add_source(Box::new(move |out: &mut [f32]| consumer.fill(out)));
             log::info!(
                 "playback: {} Hz, {} channels",
                 format.sample_rate,
@@ -318,8 +321,16 @@ impl MorphApp for App {
             ctx.audio().capture_mode()
         );
         // Four seconds of 24 kHz mono, read by the stt thread every frame.
-        let (sink, capture) = morph::capture(format, self.speaking.clone(), 4);
-        ctx.audio().add_sink(sink);
+        let (mut mic, capture) = libvoicexn::capture::Mic::new(
+            format.sample_rate,
+            format.channels,
+            self.speaking.clone(),
+            4,
+        );
+        ctx.audio()
+            .add_sink(Box::new(move |c: &libmorph::Captured<'_>| {
+                mic.push(c.samples)
+            }));
         let mut config =
             libvoicexn::config::SttConfig::for_platform(model_dir(ctx, "stt-1b-en_fr"));
         // `--quant` on the desktop; Android has no arguments.
