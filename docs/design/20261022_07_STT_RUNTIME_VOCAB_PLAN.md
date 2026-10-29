@@ -1,7 +1,7 @@
 ---
 title: Changing the STT vocabulary boost while the model runs
 date: 2026-10-22
-status: In implementation
+status: Implemented
 covers:
   - Replacing the boosted phrase list of a running `SttWorker`, under
     `stt-moshi-xn-boost`: a new `SttRequest::Vocabulary(Vec<String>)` and a
@@ -236,3 +236,19 @@ The owner (2026-10-23): "Yes, start implementing it", after the amendment
 of 2026-10-22 16:34 EDT. `status` is now `In implementation`, and the
 document is immutable from here on (AGENTS.md Rule 1.5). Step 1 is in the
 commit that carries this amendment.
+
+## Amendment — 2026-10-29 11:12 EDT: implemented
+
+`status` is now `Implemented`. Every step is done:
+- Step 1: `a8ed41e`.
+- Step 2: `b062a92`, `d8bf793`, `5f2640d`.
+- Step 3: `610b870`.
+- Step 4: `ce015d7`, with the M4 runs of 2026-10-23 in `out/stt/p07_*`.
+  On the S23 on 2026-10-29, the APK loaded `vocab.txt` and sent
+  `SttEvent::Vocabulary` (9 phrases, 18 sequences). The owner made a
+  tap-to-talk turn on the S23 and reports it heard and repeated ("did the
+  s23 turn, it heard and repeated it"). That turn was made on the 0.4.0
+  APK, which carries this plan's code unchanged; its log capture came back
+  empty, so the owner's report is the record. Departures are in
+  `CHANGES.md`.
+- Step 5: `71a7883`, tagged `v0.3.0`, pushed with the branch.
