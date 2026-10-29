@@ -1,7 +1,7 @@
 ---
 title: A speech session in libvoicexn, with no libmorph and cpal as an option
 date: 2026-10-29
-status: Draft
+status: In implementation
 covers:
   - A `session` module that runs both workers for an app: `Session`,
     `SessionConfig`, `Action`, `SessionEvent` and the `Pump` that tracks
@@ -232,3 +232,12 @@ After this, flankr moves `flankr-audio` onto 0.4.0 in flankr's own commits
 (a thin layer: `action(&Event)`, `SessionEvent` to `Input`, its vocabulary
 path, its own closures; a minor bump of flankr-audio), and RoundTwo's
 step 5 starts on it.
+
+## Amendment — 2026-10-29 10:54 EDT: approved; implementation started
+
+The owner (2026-10-29): "approve the libvoicexn path, I mean push the next
+minor/breaking libvoicexn version to github". `status` is now
+`In implementation`, and the document is immutable from here on
+(AGENTS.md Rule 1.5). Step 0 holds: 0.3.0 is committed as `71a7883` and
+tagged `v0.3.0`, to be pushed with this release. Step 1 is in the commit
+that carries this amendment.
