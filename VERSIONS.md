@@ -68,3 +68,21 @@ Mimi's encoder from the STT GGUF
   `mimi.safetensors`; the model folder needs only `model.<quant>.gguf`,
   `config.json` and `tokenizer.model`. A `mimi.safetensors` there is
   ignored.
+
+## 0.3.0 — 2026-10-29 (tag v0.3.0)
+
+Changing the STT vocabulary boost while the model runs
+(`docs/design/20261022_07_STT_RUNTIME_VOCAB_PLAN.md`).
+
+- **Breaking:** `stt::SttRequest` is no longer `Copy` (it is `Clone`), and
+  with `stt-moshi-xn-boost` gains `Vocabulary(Vec<String>)`: it replaces
+  the boosted phrases of a running `SttWorker` from the next utterance,
+  and an empty list turns the boost off. `SttRequest` and
+  `SttWorker::send` now exist with `vad-earshot` or `stt-moshi-xn-boost`.
+- **Breaking:** with `stt-moshi-xn-boost`, `stt::SttEvent` gains
+  `Vocabulary { phrases, sequences }`, sent when a list takes effect: at
+  load from `SttConfig::vocab`, and after each `SttRequest::Vocabulary`.
+- Added, with `stt-moshi-xn-boost`: `boost::BoostTable` (`new`,
+  `from_phrases(&Decoder, &[String])`, `len`, `is_empty`),
+  `boost::BoostSlot`, and `VocabBooster::with_slot(self) -> (Self,
+  BoostSlot)`.
