@@ -10,8 +10,6 @@ pub mod boost;
 #[cfg(feature = "stt-moshi-xn")]
 pub mod capture;
 pub mod config;
-#[cfg(feature = "morph")]
-pub mod morph;
 pub mod playback;
 #[cfg(feature = "session")]
 pub mod session;
