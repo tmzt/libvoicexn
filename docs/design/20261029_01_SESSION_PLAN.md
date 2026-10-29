@@ -1,7 +1,7 @@
 ---
 title: A speech session in libvoicexn, with no libmorph and cpal as an option
 date: 2026-10-29
-status: In implementation
+status: Implemented
 covers:
   - A `session` module that runs both workers for an app: `Session`,
     `SessionConfig`, `Action`, `SessionEvent` and the `Pump` that tracks
@@ -241,3 +241,21 @@ minor/breaking libvoicexn version to github". `status` is now
 (AGENTS.md Rule 1.5). Step 0 holds: 0.3.0 is committed as `71a7883` and
 tagged `v0.3.0`, to be pushed with this release. Step 1 is in the commit
 that carries this amendment.
+
+## Amendment — 2026-10-29 11:12 EDT: implemented
+
+`status` is now `Implemented`. Every step is done:
+- Step 0: `v0.3.0` at `71a7883`.
+- Step 1: `c35a412`.
+- Step 2: `0d00b29`; stop timing in `out/session/20261029_02_stop/`.
+- Step 3: `4f01719`, `66e0ea0`.
+- Step 4: `5e594c2`, `616978e`. On the S23 the voicexn APK opened
+  capture through the closures, loaded STT with the vocabulary, and the
+  owner reports that a tap-to-talk turn was heard and repeated.
+- Step 5: `f5bd22f`.
+- Step 6: `7caeb92`, tagged `v0.4.0`, pushed with the branch; README
+  `af50225`.
+
+Departures, among them `examples/voicexn` using the closures without
+`Session` and the Mac's microphone left to the owner, are in
+`CHANGES.md`.
