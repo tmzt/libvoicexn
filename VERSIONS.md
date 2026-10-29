@@ -86,3 +86,46 @@ Changing the STT vocabulary boost while the model runs
   `from_phrases(&Decoder, &[String])`, `len`, `is_empty`),
   `boost::BoostSlot`, and `VocabBooster::with_slot(self) -> (Self,
   BoostSlot)`.
+
+## 0.4.0 — 2026-10-29 (tag v0.4.0)
+
+A speech session in libvoicexn, with no libmorph and cpal as an option
+(`docs/design/20261029_01_SESSION_PLAN.md`). The generic speech plumbing of
+flankr's `flankr-audio` 0.2.0 moves here.
+
+- **Breaking:** the `morph` feature, the `morph` module (`morph::sink`,
+  `morph::source`, `morph::capture`) and the libmorph dependency are
+  removed. A libmorph app joins the audio ends to libmorph with two
+  closures on its own libmorph revision: a `Sink` calling `Mic::push`
+  and a `Source` calling `Playback::fill` or `Consumer::fill` (README,
+  "Using libvoicexn in a libmorph app").
+- Added, in the core: `playback::Playback` (`new(Consumer,
+  Arc<AtomicU32>)`, `with_cue(Vec<f32>, Arc<AtomicU32>)`, `speaking`,
+  `fill`), which drains the ring whenever its flush count moves, zeroes
+  what the ring does not cover, and mixes a mono cue over every channel;
+  and `playback::chime(rate) -> Vec<f32>`.
+- Added, with `session` (implies `stt-moshi-xn`): the `session` module.
+  - `Format { rate, channels }`.
+  - `SessionConfig { stt, tts, voice, vocab_file, echo_mute }` and
+    `SessionConfig::new(models)`.
+  - `Action` (`Speak`, `Stop`, `Arm`, `Close`, `Vocabulary`, `Cue`).
+  - `SessionEvent` (`Utterance`, `Partial`, `Listening`, `Voice`,
+    `Speaking`, `SttLoaded`, `SttLoadFailed`, `TtsLoaded`,
+    `TtsLoadFailed`, `Speed`, `Spoken`, `SpeakFailed`, `VocabularySaved`,
+    `VocabularyFailed`; `Gate` with `vad-earshot`; `Vocabulary` with
+    `stt-moshi-xn-boost`).
+  - `Session::spawn(SessionConfig, Format, Format) -> (Session, Mic,
+    Playback)`, `act`, `poll`, `set_voice`, `voice` and `vocab_file`.
+  - `session::pump`: `Pump` (`new`, `on_action`, `on_stt`, `on_tts`,
+    `tick`), `tts_request`, `stt_request`, `gate_listening` (with
+    `vad-earshot`), `vocab_text` and `write_vocab`.
+  - `Action::Vocabulary` sends `SttRequest::Vocabulary` to the running
+    model with `stt-moshi-xn-boost`, and writes `vocab_file` when one is
+    set; a `vocab_file` that exists at spawn is read in place of
+    `SttConfig::vocab`.
+- Added, with `cpal` (implies `session`; cpal 0.18.2):
+  `Session::open_default(SessionConfig)` and
+  `Session::open_default_output(SessionConfig, Format) -> (Session, Mic)`.
+- Changed, scripts: `push-model.sh`, `push-stt.sh` and `push-vocab.sh`
+  take `APP_ID`, `VOICEXN_MODELS` and `STAGE`, and follow links in a
+  shared models folder.
