@@ -13,6 +13,8 @@ pub mod config;
 #[cfg(feature = "morph")]
 pub mod morph;
 pub mod playback;
+#[cfg(feature = "session")]
+pub mod session;
 #[cfg(feature = "stt-moshi-xn")]
 pub mod spm;
 #[cfg(feature = "stt-moshi-xn")]

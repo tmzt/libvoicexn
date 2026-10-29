@@ -36,6 +36,12 @@ vad-earshot = ["stt-moshi-xn", "dep:earshot"]
 stt-moshi-xn-boost = ["stt-moshi-xn"]
 # libmorph Sink and Source adapters (plan 20261022_05, decision 4).
 morph = ["dep:libmorph"]
+# A speech session for an app: both workers, the gate and the pump
+# (plan 20261029_01).
+session = ["stt-moshi-xn", "vad-earshot"]
+
+[dev-dependencies]
+tempfile = "3"
 
 [workspace]
 members = [".", "examples/voicexn", "examples/voicexn-tty"]
