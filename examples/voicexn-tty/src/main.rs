@@ -1,8 +1,8 @@
 //! libvoicexn in a terminal (docs/design/20261022_05_LIBVOICEXN_SPLIT_PLAN.md,
 //! decision 8): the default microphone into STT, each utterance printed as
 //! `> text` and said back by Phonon on the default output. No window and no
-//! libmorph: `cpal` opens the devices, `Mic::push` and `Consumer::fill` are
-//! its callbacks.
+//! libmorph: a `Session` on the default devices, through libvoicexn's `cpal`
+//! feature (docs/design/20261029_01_SESSION_PLAN.md, step 3).
 //!
 //! ```text
 //! cargo run --release -p voicexn-tty [--features vad-earshot] -- \
@@ -22,18 +22,14 @@
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use libvoicexn::capture::Mic;
-use libvoicexn::config::{SttConfig, SttQuant, TtsConfig};
-use libvoicexn::playback;
-use libvoicexn::stt::{SttEvent, SttWorker};
-use libvoicexn::tts::{TtsEvent, TtsRequest, TtsWorker};
+use libvoicexn::config::SttQuant;
+use libvoicexn::session::{Action, Format, Session, SessionConfig, SessionEvent};
 #[cfg(feature = "vad-earshot")]
-use libvoicexn::{stt::SttRequest, vad::GateState};
+use libvoicexn::vad::GateState;
 
 /// How often the terminal is updated.
 const TICK: Duration = Duration::from_millis(20);
@@ -124,72 +120,15 @@ fn parse_line(line: &str) -> Input {
 }
 
 fn run(args: Args) -> Result<(), String> {
-    let host = cpal::default_host();
-    let output = host.default_output_device().ok_or("no output device")?;
-    let out_config = output.default_output_config().map_err(|e| e.to_string())?;
-    let (out_rate, out_channels) = (out_config.sample_rate(), out_config.channels());
-    log::info!("playback: {out_rate} Hz, {out_channels} channels");
-
-    // Two seconds of output, and a microphone muted while it plays. A file
-    // has no echo, so it is never muted.
-    let (producer, mut consumer) = playback::ring(out_rate as usize * 2, out_channels, out_rate);
-    let mut file = None;
-    let mut in_stream = None;
-    let capture = if let Some(path) = &args.input {
-        let wav = read_wav(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        log::info!(
-            "input: {}, {} Hz, {} channels, {:.1} s",
-            path.display(),
-            wav.rate,
-            wav.channels,
-            wav.samples.len() as f32 / wav.channels as f32 / wav.rate as f32
-        );
-        let never = Arc::new(AtomicBool::new(false));
-        let (mic, capture) = Mic::new(wav.rate, wav.channels, never, 4);
-        file = Some((mic, wav));
-        capture
-    } else {
-        let input = host.default_input_device().ok_or("no input device")?;
-        let in_config = input.default_input_config().map_err(|e| e.to_string())?;
-        let (in_rate, in_channels) = (in_config.sample_rate(), in_config.channels());
-        log::info!("capture: {in_rate} Hz, {in_channels} channels");
-        let (mut mic, capture) = Mic::new(in_rate, in_channels, consumer.speaking(), 4);
-        let stream = input
-            .build_input_stream::<f32, _, _>(
-                in_config.config(),
-                move |samples: &[f32], _: &cpal::InputCallbackInfo| mic.push(samples),
-                |e| log::error!("capture: {e}"),
-                None,
-            )
-            .map_err(|e| format!("capture: {e}"))?;
-        in_stream = Some(stream);
-        capture
-    };
-    let out_stream = output
-        .build_output_stream::<f32, _, _>(
-            out_config.config(),
-            move |out: &mut [f32], _: &cpal::OutputCallbackInfo| consumer.fill(out),
-            |e| log::error!("playback: {e}"),
-            None,
-        )
-        .map_err(|e| format!("playback: {e}"))?;
-    out_stream.play().map_err(|e| format!("playback: {e}"))?;
-    if let Some(stream) = &in_stream {
-        stream.play().map_err(|e| format!("capture: {e}"))?;
-    }
-
-    let tts = TtsWorker::spawn(
-        TtsConfig::for_platform("models/phonon-31m-en"),
-        Some(producer),
-    );
-    let mut stt_config = SttConfig::for_platform("models/stt-1b-en_fr");
+    let mut config = SessionConfig::new("models");
+    config.voice = args.voice.clone();
     if let Some(quant) = args.quant {
-        stt_config.quant = quant;
+        config.stt.quant = quant;
     }
     if let Some(vocab) = args.vocab {
         #[cfg(feature = "stt-moshi-xn-boost")]
         {
-            stt_config.vocab = Some(vocab);
+            config.stt.vocab = Some(vocab);
         }
         #[cfg(not(feature = "stt-moshi-xn-boost"))]
         log::warn!(
@@ -199,10 +138,32 @@ fn run(args: Args) -> Result<(), String> {
     }
     log::info!(
         "stt: loading {} ({:?})",
-        stt_config.model_dir.display(),
-        stt_config.quant
+        config.stt.model_dir.display(),
+        config.stt.quant
     );
-    let stt = SttWorker::spawn(stt_config, capture);
+
+    // A file has no echo, so it is never muted.
+    let mut file = None;
+    let mut session = if let Some(path) = &args.input {
+        let wav = read_wav(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        log::info!(
+            "input: {}, {} Hz, {} channels, {:.1} s",
+            path.display(),
+            wav.rate,
+            wav.channels,
+            wav.samples.len() as f32 / wav.channels as f32 / wav.rate as f32
+        );
+        config.echo_mute = false;
+        let input = Format {
+            rate: wav.rate,
+            channels: wav.channels,
+        };
+        let (session, mic) = Session::open_default_output(config, input)?;
+        file = Some((mic, wav));
+        session
+    } else {
+        Session::open_default(config)?
+    };
 
     // Lines and end of input, from a thread of their own. With `--input`,
     // the file's sender keeps the channel open past the end of stdin.
@@ -229,30 +190,27 @@ fn run(args: Args) -> Result<(), String> {
             Ok(Input::Enter) if loaded => {
                 #[cfg(feature = "vad-earshot")]
                 match gate {
-                    GateState::Idle => stt.send(SttRequest::Arm),
-                    GateState::Armed | GateState::Open => stt.send(SttRequest::Close),
+                    GateState::Idle => session.act(Action::Arm),
+                    GateState::Armed | GateState::Open => session.act(Action::Close),
                     GateState::Closing => {}
                 }
                 #[cfg(not(feature = "vad-earshot"))]
                 if let Some(text) = last.clone() {
-                    tts.send(TtsRequest::Speak {
-                        text,
-                        voice: args.voice.clone(),
-                    });
+                    session.act(Action::Speak(text));
                 }
             }
             Ok(Input::Vocab(names)) => {
                 #[cfg(feature = "stt-moshi-xn-boost")]
-                stt.send(libvoicexn::stt::SttRequest::Vocabulary(names));
+                session.act(Action::Vocabulary(names));
                 #[cfg(not(feature = "stt-moshi-xn-boost"))]
                 terminal.log(|| log::warn!("vocab: {names:?}: built without stt-moshi-xn-boost"));
             }
             Ok(Input::FileEnd) | Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
             Ok(Input::Enter) | Err(mpsc::TryRecvError::Empty) => {}
         }
-        for event in stt.poll() {
+        for event in session.poll() {
             match event {
-                SttEvent::Loaded { load_ms } => {
+                SessionEvent::SttLoaded { load_ms } => {
                     loaded = true;
                     if let Some(((mic, wav), done)) = file.take() {
                         std::thread::spawn(move || feed_file(mic, wav, done));
@@ -264,44 +222,40 @@ fn run(args: Args) -> Result<(), String> {
                     };
                     terminal.log(|| log::info!("stt: loaded in {load_ms} ms; {doing}"));
                 }
-                SttEvent::LoadFailed(e) => return Err(format!("stt: {e}")),
-                SttEvent::Partial(text) => terminal.partial(&text),
-                SttEvent::Utterance(text) => {
+                SessionEvent::SttLoadFailed(e) => return Err(format!("stt: {e}")),
+                SessionEvent::Partial(text) => terminal.partial(&text),
+                SessionEvent::Utterance(text) => {
                     terminal.line(&format!("> {text}"));
-                    tts.send(TtsRequest::Speak {
-                        text: text.clone(),
-                        voice: args.voice.clone(),
-                    });
+                    session.act(Action::Speak(text.clone()));
                     #[cfg(not(feature = "vad-earshot"))]
                     {
                         last = Some(text);
                     }
                 }
-                SttEvent::Speed { step_ms, dropped } => terminal
+                SessionEvent::Speed { step_ms, dropped } => terminal
                     .log(|| log::info!("stt: step {step_ms:.1} ms of 80, dropped {dropped}")),
                 #[cfg(feature = "vad-earshot")]
-                SttEvent::Gate(state) => {
+                SessionEvent::Gate(state) => {
                     gate = state;
                     terminal.log(|| log::info!("stt: gate {state:?}"));
                 }
                 #[cfg(feature = "stt-moshi-xn-boost")]
-                SttEvent::Vocabulary { phrases, sequences } => terminal.log(|| {
+                SessionEvent::Vocabulary { phrases, sequences } => terminal.log(|| {
                     log::info!("stt: vocabulary {phrases} phrases ({sequences} sequences)")
                 }),
-            }
-        }
-        for event in tts.poll() {
-            match event {
-                TtsEvent::Loaded { voices, load_ms } => terminal
-                    .log(|| log::info!("tts: loaded in {load_ms} ms, {} voices", voices.len())),
-                TtsEvent::LoadFailed(e) => return Err(format!("tts: {e}")),
-                TtsEvent::Finished {
-                    audio_ms, synth_ms, ..
-                } => terminal.log(|| log::info!("tts: {audio_ms} ms of audio in {synth_ms} ms")),
-                TtsEvent::Failed { error, .. } => terminal.log(|| log::error!("tts: {error}")),
-                TtsEvent::Started { .. }
-                | TtsEvent::FirstAudio { .. }
-                | TtsEvent::Stopped { .. } => {}
+                SessionEvent::TtsLoaded {
+                    load_ms, voices, ..
+                } => terminal.log(|| log::info!("tts: loaded in {load_ms} ms, {voices} voices")),
+                SessionEvent::TtsLoadFailed(e) => return Err(format!("tts: {e}")),
+                SessionEvent::Spoken { audio_ms, synth_ms } => {
+                    terminal.log(|| log::info!("tts: {audio_ms} ms of audio in {synth_ms} ms"))
+                }
+                SessionEvent::SpeakFailed(error) => terminal.log(|| log::error!("tts: {error}")),
+                SessionEvent::Listening(_)
+                | SessionEvent::Voice(_)
+                | SessionEvent::Speaking(_)
+                | SessionEvent::VocabularySaved { .. }
+                | SessionEvent::VocabularyFailed(_) => {}
             }
         }
         std::thread::sleep(TICK);

@@ -11,9 +11,8 @@ name = "voicexn-tty"
 path = "src/main.rs"
 
 [dependencies]
-libvoicexn = { path = "../..", features = ["stt-moshi-xn"] }
-# The default input and output devices; the version libmorph's libmobile uses.
-cpal = "0.18.2"
+# A session on the default input and output devices.
+libvoicexn = { path = "../..", features = ["cpal"] }
 env_logger = "0.11"
 log = "0.4"
 
