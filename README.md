@@ -68,6 +68,47 @@ loop {
 }
 ```
 
+## Using libvoicexn in a libmorph app
+
+libmorph apps join libvoicexn to libmorph's own audio with two closures,
+in the app, on the app's own libmorph revision. This is the intended way,
+not a workaround. On Android libmorph has to own the streams: it opens
+capture in `VoiceRecognition` mode, asks for the microphone permission,
+and stops and restarts audio on suspend and resume. libvoicexn opening
+devices of its own would compete with it. libmorph already brings cpal
+(libmobile's copy on Android), so nothing more is pulled in.
+
+```rust
+// In MorphApp::audio_setup: setup.capture = true, and on Android
+// setup.capture_mode = libmorph::CaptureMode::VoiceRecognition.
+
+// Once libmorph has opened capture:
+let format = ctx.audio().capture_format()?; // libmorph::CaptureFormat
+let speaking = consumer.speaking(); // consumer from playback::ring
+let (mut mic, capture) = Mic::new(format.sample_rate, format.channels, speaking, 4);
+ctx.audio().add_sink(Box::new(move |c: &libmorph::Captured<'_>| mic.push(c.samples)));
+ctx.audio().add_source(Box::new(move |out: &mut [f32]| consumer.fill(out)));
+```
+
+`speaking` is the `Arc<AtomicBool>` from `Consumer::speaking`, so the
+microphone is muted while the app talks. `capture` goes to
+`SttWorker::spawn`, and `consumer` comes from `playback::ring`.
+
+Apps without libmorph (tty tools, command lines) open devices themselves,
+as `examples/voicexn-tty` does with cpal: its input callback calls
+`Mic::push` and its output callback calls `Consumer::fill`.
+
+**Changing in 0.4.0** (planned in
+[A speech session in libvoicexn](docs/design/20261029_01_SESSION_PLAN.md)):
+- The `morph` feature and its libmorph dependency are removed, and the
+  closures above are the only libmorph path.
+- A `session` module runs both workers. `Session::spawn` returns the `Mic`
+  and a `Playback`, and the output closure calls `playback.fill(out)` in
+  place of `consumer.fill(out)`.
+- A new `cpal` feature (`Session::open_default`) opens the default devices
+  for apps without libmorph.
+- The push scripts take `APP_ID`, `VOICEXN_MODELS` and `STAGE`.
+
 ## The example: voicexn
 
 [`examples/voicexn`](examples/voicexn) is a small app that listens, shows
