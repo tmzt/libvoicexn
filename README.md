@@ -10,30 +10,37 @@ Runtime, on the desktop and on Android. On a Galaxy S23 Ultra the 4-bit
 (q4k) STT model steps in 49–66 ms against its 80 ms frame, and Phonon's
 first audio comes 30–80 ms after it is asked.
 
-The library holds the engine and no UI:
+The library holds the engine and no UI, and opens no device unless asked:
 
+- **`session`** (`session`): what most apps want. A `Session` runs both
+  workers, with `vad-earshot` the gate, and a pump that reports the turn
+  state: `Utterance`, `Listening`, `Voice` and `Speaking`, each only when
+  it changes. Speaking ends only once the speaker's ring has run dry. The
+  app sends it `Action`s (`Speak`, `Stop`, `Arm`, `Close`, `Vocabulary`,
+  `Cue`), polls `SessionEvent`s, and can change the voice while it runs.
 - **`tts`**: a `TtsWorker` thread that loads Phonon, takes `Speak` and
   `Stop` requests, and streams 24 kHz audio into the playback ring as it
   is made.
 - **`stt`**: an `SttWorker` thread that steps the STT model on each 80 ms
   frame of the microphone, and reports partial text, ended utterances and
   its own speed.
-- **`capture`** and **`playback`**: the realtime ends. `Mic::push` takes
-  the input callback's interleaved samples, downmixes, resamples to 24 kHz
-  and mutes itself while the app is speaking; `Consumer::fill` feeds the
-  output callback. Neither blocks or allocates on the audio thread.
+- **`capture`** and **`playback`**: the realtime ends.
+  - `Mic::push` takes the input callback's interleaved samples, downmixes
+    them, resamples to 24 kHz and mutes itself while the app is speaking.
+  - `Playback::fill` feeds the output callback. It can be flushed at any
+    moment, zeroes what the ring does not cover, and mixes in a cue. It
+    wraps `Consumer`, the bare ring end.
+  - Neither blocks or allocates on the audio thread.
 - **`vad`** (`vad-earshot`): tap to talk. The pure-Rust
   [earshot](https://crates.io/crates/earshot) voice activity detector
   opens and closes a gate in front of the STT model, which is idle between
   turns.
 - **`boost`** (`stt-moshi-xn-boost`): biases recognition toward a list of
   words the model does not know, such as product names, encoded by a
-  SentencePiece tokenizer written in Rust (`spm`).
+  SentencePiece tokenizer written in Rust (`spm`). The list can be
+  replaced while the model runs.
 - **`config`**: `SttConfig` and `TtsConfig`, with `for_platform`
   defaults.
-- **`morph`** (`morph`): adapters from the audio ends to a
-  [libmorph](https://github.com/tmzt/libmorph) `Sink` and `Source`. The
-  core does not depend on libmorph.
 
 | Feature | What it adds |
 |---|---|
@@ -41,73 +48,91 @@ The library holds the engine and no UI:
 | `stt-moshi-xn` | Speech-to-text |
 | `vad-earshot` | Tap to talk, gated by earshot (implies `stt-moshi-xn`) |
 | `stt-moshi-xn-boost` | Vocabulary boosting (implies `stt-moshi-xn`) |
-| `morph` | libmorph `Sink` and `Source` adapters |
+| `session` | `Session`: both workers and the pump (implies `stt-moshi-xn`) |
+| `cpal` | `Session::open_default`: the session on the default devices, for apps without libmorph (implies `session`) |
+
+libvoicexn has no libmorph dependency. Since 0.4.0 there is no `morph`
+feature; libmorph apps use two closures (below).
 
 ```rust
-use libvoicexn::capture::Mic;
-use libvoicexn::config::{SttConfig, TtsConfig};
-use libvoicexn::playback;
-use libvoicexn::stt::{SttEvent, SttWorker};
-use libvoicexn::tts::{TtsRequest, TtsWorker};
+use libvoicexn::session::{Action, Format, Session, SessionConfig, SessionEvent};
 
-// Two seconds of output at the device's rate, and a microphone that is
-// muted while that ring is playing.
-let (producer, consumer) = playback::ring(2 * out_rate as usize, out_channels, out_rate);
-let (mic, capture) = Mic::new(in_rate, in_channels, consumer.speaking(), 4);
-// Input callback: mic.push(samples). Output callback: consumer.fill(out).
+let config = SessionConfig::new("models"); // phonon-31m-en and stt-1b-en_fr
+let (mut session, mic, playback) = Session::spawn(config, input, output);
+// Input callback: mic.push(samples). Output callback: playback.fill(out).
+// Or, with `cpal`: let mut session = Session::open_default(config)?;
 
-let tts = TtsWorker::spawn(TtsConfig::for_platform("models/phonon-31m-en"), Some(producer));
-let stt = SttWorker::spawn(SttConfig::for_platform("models/stt-1b-en_fr"), capture);
 loop {
-    for event in stt.poll() {
-        if let SttEvent::Utterance(text) = event {
-            tts.send(TtsRequest::Speak { text, voice: None });
+    for event in session.poll() {
+        if let SessionEvent::Utterance(text) = event {
+            session.act(Action::Speak(text));
         }
     }
-    // ...
+    // ... every 20 ms or so
 }
 ```
 
 ## Using libvoicexn in a libmorph app
 
 libmorph apps join libvoicexn to libmorph's own audio with two closures,
-in the app, on the app's own libmorph revision. This is the intended way,
-not a workaround. On Android libmorph has to own the streams: it opens
-capture in `VoiceRecognition` mode, asks for the microphone permission,
-and stops and restarts audio on suspend and resume. libvoicexn opening
-devices of its own would compete with it. libmorph already brings cpal
-(libmobile's copy on Android), so nothing more is pulled in.
+written in the app, on the app's own libmorph revision. This is the
+intended way, not a workaround:
+- On Android libmorph has to own the streams. It opens capture in
+  `VoiceRecognition` mode, asks for the microphone permission, and stops
+  and restarts audio on suspend and resume. Devices that libvoicexn opened
+  itself would compete with it.
+- libmorph already brings cpal (libmobile's copy on Android), so nothing
+  more is pulled in. Leave libvoicexn's `cpal` feature off.
+- Because libvoicexn names no libmorph revision, an app can move libmorph
+  without waiting for a libvoicexn release. libmorph's
+  `links = "libmorph"` allows one revision per build.
+
+With a session, once libmorph has opened capture:
 
 ```rust
 // In MorphApp::audio_setup: setup.capture = true, and on Android
 // setup.capture_mode = libmorph::CaptureMode::VoiceRecognition.
 
-// Once libmorph has opened capture:
-let format = ctx.audio().capture_format()?; // libmorph::CaptureFormat
-let speaking = consumer.speaking(); // consumer from playback::ring
-let (mut mic, capture) = Mic::new(format.sample_rate, format.channels, speaking, 4);
+let cap = ctx.audio().capture_format()?; // libmorph::CaptureFormat
+let out = ctx.audio().format()?;
+let input = Format { rate: cap.sample_rate, channels: cap.channels };
+let output = Format { rate: out.sample_rate, channels: out.channels };
+let (session, mut mic, mut playback) = Session::spawn(config, input, output);
 ctx.audio().add_sink(Box::new(move |c: &libmorph::Captured<'_>| mic.push(c.samples)));
-ctx.audio().add_source(Box::new(move |out: &mut [f32]| consumer.fill(out)));
+ctx.audio().add_source(Box::new(move |buf: &mut [f32]| playback.fill(buf)));
 ```
 
-`speaking` is the `Arc<AtomicBool>` from `Consumer::speaking`, so the
-microphone is muted while the app talks. `capture` goes to
-`SttWorker::spawn`, and `consumer` comes from `playback::ring`.
+With the workers alone, as `examples/voicexn` does so it can speak before
+the microphone is open, the same two closures take a `Mic` from
+`Mic::new(rate, channels, consumer.speaking(), 4)` and a `Consumer` from
+`playback::ring`:
 
-Apps without libmorph (tty tools, command lines) open devices themselves,
-as `examples/voicexn-tty` does with cpal: its input callback calls
-`Mic::push` and its output callback calls `Consumer::fill`.
+```rust
+ctx.audio().add_source(Box::new(move |buf: &mut [f32]| consumer.fill(buf)));
+ctx.audio().add_sink(Box::new(move |c: &libmorph::Captured<'_>| mic.push(c.samples)));
+```
 
-**Changing in 0.4.0** (planned in
-[A speech session in libvoicexn](docs/design/20261029_01_SESSION_PLAN.md)):
-- The `morph` feature and its libmorph dependency are removed, and the
-  closures above are the only libmorph path.
-- A `session` module runs both workers. `Session::spawn` returns the `Mic`
-  and a `Playback`, and the output closure calls `playback.fill(out)` in
-  place of `consumer.fill(out)`.
-- A new `cpal` feature (`Session::open_default`) opens the default devices
-  for apps without libmorph.
-- The push scripts take `APP_ID`, `VOICEXN_MODELS` and `STAGE`.
+Apps without libmorph turn on `cpal` and call `Session::open_default`, as
+`examples/voicexn-tty` does. `Session::open_default_output` opens only the
+speaker, for input the app pushes itself, such as a file.
+
+### Models on an Android phone, for any app
+
+The push scripts copy the models into an app's data directory with
+`run-as`, so any debuggable app can use them, run from a libvoicexn
+checkout:
+
+```sh
+APP_ID=com.example.app ~/src/libvoicexn/scripts/push-model.sh   # Phonon and its voices
+APP_ID=com.example.app ~/src/libvoicexn/scripts/push-stt.sh     # Kyutai STT, q4k
+APP_ID=com.example.app ~/src/libvoicexn/scripts/push-vocab.sh my-vocab.txt
+```
+
+`VOICEXN_MODELS` names the models folder (default: `models/` here), and
+`STAGE` the staging path on the phone. STT files are staged once in
+`/data/local/tmp/voicexn-stt`, shared by every app, and are not pushed
+again. `scripts/fetch-model.sh` and `scripts/fetch-stt.sh` fetch the
+models; `fetch-stt.sh` also makes the quantized GGUFs (`STT_QUANTS`).
 
 ## The example: voicexn
 
